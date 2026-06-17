@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import {
   Sparkles,
@@ -29,6 +29,7 @@ import type {
   WordEntry,
   AudienceQuestion,
 } from "../../shared/types";
+import { sanitizeRatingConfig } from "../../shared/types";
 
 export default function AudienceRoom() {
   const { code } = useParams<{ code: string }>();
@@ -136,10 +137,11 @@ export default function AudienceRoom() {
     });
   }
 
-  function submitQuestion() {
+  function submitQuestion(cid: string) {
     if (!code || !myQuestion.trim()) return;
     socket.emit("audience:askQuestion", {
       roomCode: code,
+      componentId: cid,
       question: myQuestion.trim(),
     });
     setQuestionSent(true);
@@ -270,7 +272,7 @@ export default function AudienceRoom() {
                     config={comp.config as QnaConfig}
                     value={myQuestion}
                     onChange={setMyQuestion}
-                    onSubmit={submitQuestion}
+                    onSubmit={() => submitQuestion(comp.id)}
                     sent={questionSent}
                   />
                 )}
@@ -505,6 +507,7 @@ function RatingInput({
   result?: RatingResult;
   onSubmit: (v: number) => void;
 }) {
+  const safe = sanitizeRatingConfig(config);
   const [local, setLocal] = useState<number | null>(selected ?? null);
 
   function select(v: number) {
@@ -514,7 +517,7 @@ function RatingInput({
 
   const total = result?.totalResponses ?? 0;
   const avg = result?.average ?? 0;
-  void useMemo;
+  const stepCount = Math.max(1, Math.min(100, Math.floor((safe.max - safe.min) / safe.step) + 1));
 
   return (
     <div className="card p-5">
@@ -529,13 +532,13 @@ function RatingInput({
         )}
       </div>
       <h3 className="font-display text-xl text-slate-800 mb-4 leading-tight">
-        {config.title}
+        {safe.title}
       </h3>
 
       <div className="space-y-4 mb-5">
         <div className="flex items-center justify-between gap-1">
-          {Array.from({ length: Math.floor((config.max - config.min) / config.step) + 1 }, (_, i) => {
-            const v = config.min + i * config.step;
+          {Array.from({ length: stepCount }, (_, i) => {
+            const v = +(safe.min + i * safe.step).toFixed(2);
             const active = local !== null && v <= local;
             return (
               <button
@@ -557,8 +560,8 @@ function RatingInput({
           })}
         </div>
         <div className="flex justify-between text-[11px] text-slate-400 px-1">
-          <span>{config.minLabel || `${config.min}分`}</span>
-          <span>{config.maxLabel || `${config.max}分`}</span>
+          <span>{safe.minLabel || `${safe.min}分`}</span>
+          <span>{safe.maxLabel || `${safe.max}分`}</span>
         </div>
       </div>
 
@@ -567,7 +570,7 @@ function RatingInput({
           <div className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">实时平均分</div>
           <div className="font-display text-3xl bg-gradient-to-br from-highlight-500 to-highlight-600 bg-clip-text text-transparent leading-tight">
             {avg.toFixed(2)}
-            <span className="text-base text-slate-400 ml-1">/ {config.max}</span>
+            <span className="text-base text-slate-400 ml-1">/ {safe.max}</span>
           </div>
           <div className="text-[11px] text-slate-500 mt-1">
             共 {total} 人评分

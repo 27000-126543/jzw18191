@@ -13,7 +13,9 @@ import type {
   RatingConfig,
   WordcloudConfig,
   QnaConfig,
+  AudienceQuestion,
 } from "../shared/types.js";
+import { sanitizeRatingConfig } from "../shared/types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -246,15 +248,17 @@ export function calculateRatingResult(
   component: InteractiveComponent,
 ): RatingResult {
   const responses = session.ratingResponses.filter((r) => r.componentId === component.id);
-  const cfg = component.config as RatingConfig;
+  const rawCfg = component.config as RatingConfig;
+  const cfg = sanitizeRatingConfig(rawCfg);
   const dist: { rating: number; count: number }[] = [];
-  for (let v = cfg.min; v <= cfg.max; v += cfg.step) {
-    dist.push({ rating: v, count: 0 });
+  for (let v = cfg.min; v <= cfg.max + cfg.step * 0.001; v = +(v + cfg.step).toFixed(4)) {
+    dist.push({ rating: +v.toFixed(2), count: 0 });
+    if (dist.length > 100) break;
   }
   let sum = 0;
   for (const r of responses) {
     sum += r.rating;
-    const d = dist.find((x) => x.rating === r.rating);
+    const d = dist.find((x) => Math.abs(x.rating - r.rating) < cfg.step * 0.5);
     if (d) d.count++;
   }
   const total = responses.length;
@@ -289,12 +293,12 @@ export function buildReport(presentationId: string, sessionId: string): ReportDa
       else if (c.type === "wordcloud") prompt = (cfg as WordcloudConfig).prompt;
       else if (c.type === "rating") prompt = (cfg as RatingConfig).title;
       else prompt = (cfg as QnaConfig).prompt;
-      let results: PollResult | (typeof session.words)[string] | RatingResult | { questions: typeof session.questions } =
+      let results: PollResult | (typeof session.words)[string] | RatingResult | { questions: AudienceQuestion[] } =
         [];
       if (c.type === "poll") results = calculatePollResult(session, c);
       else if (c.type === "wordcloud") results = session.words[c.id] || [];
       else if (c.type === "rating") results = calculateRatingResult(session, c);
-      else results = { questions: session.questions };
+      else results = { questions: session.questions.filter((q) => q.componentId === c.id) };
       return { componentId: c.id, type: c.type, prompt, results };
     }),
   }));

@@ -86,11 +86,20 @@ export function setupSocket(server: HTTPServer): void {
       },
     );
 
-    socket.on("presenter:end", ({ presentationId }: { presentationId: string }) => {
-      const session = getSessionByPresentation(presentationId);
+    socket.on("presenter:end", ({ presentationId, sessionId }: { presentationId: string; sessionId?: string }) => {
+      let session: Session | undefined;
+      if (sessionId) {
+        session = sessions.get(sessionId);
+      } else {
+        session = Array.from(sessions.values()).find(
+          (s) => s.presentationId === presentationId,
+        );
+      }
       if (!session) return;
-      session.endedAt = new Date().toISOString();
-      persistSessions();
+      if (!session.endedAt) {
+        session.endedAt = new Date().toISOString();
+        persistSessions();
+      }
       io?.to(`aud:${session.id}`).emit("presentation:ended");
       io?.to(`pres:${session.id}`).emit("presentation:ended", { sessionId: session.id });
     });
@@ -250,7 +259,7 @@ export function setupSocket(server: HTTPServer): void {
 
     socket.on(
       "audience:askQuestion",
-      ({ roomCode, question }: { roomCode: string; question: string }) => {
+      ({ roomCode, componentId, question }: { roomCode: string; componentId: string; question: string }) => {
         const sid = sessionsByRoom.get(roomCode.toUpperCase());
         if (!sid) return;
         const session = sessions.get(sid);
@@ -259,6 +268,7 @@ export function setupSocket(server: HTTPServer): void {
         const q: AudienceQuestion = {
           id: genId("q_"),
           sessionId: session.id,
+          componentId: componentId || "",
           content: question.trim().slice(0, 500),
           isShown: false,
           isAnswered: false,

@@ -20,6 +20,26 @@ export interface RatingConfig {
   step: number;
 }
 
+export function sanitizeRatingConfig(cfg: RatingConfig): RatingConfig {
+  let { min, max, step } = cfg;
+  if (typeof min !== "number" || isNaN(min)) min = 1;
+  if (typeof max !== "number" || isNaN(max)) max = 5;
+  if (typeof step !== "number" || isNaN(step) || step <= 0) step = 1;
+  if (min >= max) {
+    max = min + step;
+  }
+  const range = max - min;
+  const steps = Math.floor(range / step);
+  if (steps < 1) {
+    step = range || 1;
+  }
+  if (steps > 100) {
+    step = +(range / 100).toFixed(2);
+    if (step <= 0) step = 1;
+  }
+  return { ...cfg, min: +min.toFixed(2), max: +max.toFixed(2), step: +step.toFixed(2) };
+}
+
 export interface QnaConfig {
   prompt: string;
   anonymous: boolean;
@@ -74,6 +94,7 @@ export interface RatingResponse {
 export interface AudienceQuestion {
   id: string;
   sessionId: string;
+  componentId: string;
   content: string;
   isShown: boolean;
   isAnswered: boolean;

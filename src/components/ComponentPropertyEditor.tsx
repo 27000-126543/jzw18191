@@ -1,6 +1,7 @@
-import { X, Plus, Trash2 } from "lucide-react";
+import { X, Plus, Trash2, AlertTriangle } from "lucide-react";
 import type { InteractiveComponent } from "../../shared/types";
 import type { PollConfig, WordcloudConfig, RatingConfig, QnaConfig } from "../../shared/types";
+import { sanitizeRatingConfig } from "../../shared/types";
 
 interface Props {
   slideId: string;
@@ -219,6 +220,15 @@ function RatingEditor({
   config: RatingConfig;
   update: (p: Record<string, any>) => void;
 }) {
+  const safe = sanitizeRatingConfig(config);
+  const hasIssue =
+    config.min !== safe.min || config.max !== safe.max || config.step !== safe.step;
+
+  function updateWithCheck(patch: Record<string, any>) {
+    const next = sanitizeRatingConfig({ ...config, ...patch });
+    update({ min: next.min, max: next.max, step: next.step, title: next.title, minLabel: next.minLabel, maxLabel: next.maxLabel });
+  }
+
   return (
     <div className="space-y-3.5">
       <Section title="标题">
@@ -234,7 +244,7 @@ function RatingEditor({
           <input
             type="number"
             value={config.min}
-            onChange={(e) => update({ min: Number(e.target.value) })}
+            onChange={(e) => updateWithCheck({ min: Number(e.target.value) })}
             className="input-field py-1.5 text-sm"
           />
         </Section>
@@ -242,7 +252,7 @@ function RatingEditor({
           <input
             type="number"
             value={config.max}
-            onChange={(e) => update({ max: Number(e.target.value) })}
+            onChange={(e) => updateWithCheck({ max: Number(e.target.value) })}
             className="input-field py-1.5 text-sm"
           />
         </Section>
@@ -250,12 +260,25 @@ function RatingEditor({
       <Section title="步长">
         <input
           type="number"
-          min={0.1}
+          min={0.01}
+          step={0.1}
           value={config.step}
-          onChange={(e) => update({ step: Number(e.target.value) })}
+          onChange={(e) => updateWithCheck({ step: Number(e.target.value) })}
           className="input-field py-1.5 text-sm"
         />
       </Section>
+      {hasIssue && (
+        <div className="flex items-start gap-2 p-3 rounded-xl bg-yellow-50 border border-yellow-200 text-sm text-yellow-700">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <div>
+            <span className="font-semibold">配置已自动纠正</span>
+            <div className="text-xs mt-1 text-yellow-600">
+              最小值 {safe.min} / 最大值 {safe.max} / 步长 {safe.step}
+              （至少需 1 个刻度，最多 100 个）
+            </div>
+          </div>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3">
         <Section title="最低标签">
           <input

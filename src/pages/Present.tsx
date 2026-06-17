@@ -61,6 +61,8 @@ export default function Present() {
 
   const currentSlide = presentation?.slides[currentSlideIndex];
   const totalSlides = presentation?.slides.length ?? 0;
+  const currentQnaIds = currentSlide?.components.filter((c) => c.type === "qna").map((c) => c.id) ?? [];
+  const currentQuestions = questions.filter((q) => currentQnaIds.length === 0 || currentQnaIds.includes(q.componentId));
 
   const liveData = useMemo(
     () => ({ pollResults, wordclouds, ratingResults, questions, shownQuestion }),
@@ -90,8 +92,9 @@ export default function Present() {
     });
     socket.on("presentation:paused", (data: any) => setLive({ paused: data.paused }));
     socket.on("presentation:ended", (data: any) => {
-      if (data.sessionId) {
-        setTimeout(() => navigate(`/report/${id}/${data.sessionId}`), 800);
+      const sid = data?.sessionId || sessionId;
+      if (sid && id) {
+        navigate(`/report/${id}/${sid}`);
       }
     });
     socket.on("audience:count", (data: any) => setLive({ audienceCount: data.count }));
@@ -214,8 +217,13 @@ export default function Present() {
     if (!id || !confirm("确认结束本次演示？将跳转至数据报告页面")) return;
     try {
       const res = await api.endSession(id);
-      socket.emit("presenter:end", { presentationId: id });
-      navigate(`/report/${id}/${res.sessionId}`);
+      const sid = res.sessionId || sessionId;
+      if (sid) {
+        socket.emit("presenter:end", { presentationId: id, sessionId: sid });
+        navigate(`/report/${id}/${sid}`);
+      } else {
+        navigate("/");
+      }
     } catch (e) {
       alert((e as Error).message);
     }
@@ -293,9 +301,9 @@ export default function Present() {
             title="问答面板"
           >
             <MessageSquare className="w-5 h-5" />
-            {questions.filter((q) => !q.isAnswered).length > 0 && (
+            {currentQuestions.filter((q) => !q.isAnswered).length > 0 && (
               <span className="absolute -mt-6 ml-3 px-1.5 py-0.5 text-[10px] rounded-full bg-red-500 font-bold">
-                {questions.filter((q) => !q.isAnswered).length}
+                {currentQuestions.filter((q) => !q.isAnswered).length}
               </span>
             )}
           </button>
@@ -380,20 +388,20 @@ export default function Present() {
                 问答管理
               </div>
               <span className="chip bg-white/10 text-white/80">
-                共 {questions.length} 条
+                共 {currentQuestions.length} 条
               </span>
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3 space-y-2.5">
-              {questions.length === 0 ? (
+              {currentQuestions.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center text-sm text-white/40 py-10">
                   <MessageSquare className="w-10 h-10 mb-2 opacity-50" />
-                  <p>暂无观众提问</p>
+                  <p>当前页暂无观众提问</p>
                   <p className="text-xs opacity-60 mt-1">
-                    问答将实时显示在这里
+                    翻到问答页后，问题将显示在这里
                   </p>
                 </div>
               ) : (
-                [...questions]
+                [...currentQuestions]
                   .sort((a, b) => (b.isShown === a.isShown ? 0 : b.isShown ? 1 : -1))
                   .sort((a, b) => (b.isAnswered === a.isAnswered ? 0 : a.isAnswered ? 1 : -1))
                   .map((q, i) => (

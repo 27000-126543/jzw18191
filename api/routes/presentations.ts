@@ -66,7 +66,8 @@ router.put("/:id", (req: Request, res: Response) => {
 
 router.delete("/:id", (req: Request, res: Response) => {
   const ok = deletePresentation(req.params.id);
-  res.json({ success: ok });
+  if (!ok) return res.status(404).json({ success: false, error: "演示文稿不存在" });
+  res.json({ success: true, data: { deleted: true } });
 });
 
 router.post("/:id/start", (req: Request, res: Response) => {
@@ -81,7 +82,7 @@ router.post("/:id/end", (req: Request, res: Response) => {
   );
   if (!session) return res.status(404).json({ success: false, error: "无进行中的演示" });
   endSession(session.id);
-  res.json({ success: true, sessionId: session.id });
+  res.json({ success: true, data: { sessionId: session.id } });
 });
 
 router.get("/:id/active-session", (req: Request, res: Response) => {

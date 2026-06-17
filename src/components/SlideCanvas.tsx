@@ -68,8 +68,8 @@ function renderComponent(
       return (
         <QnaDisplay
           config={comp.config as any}
-          questions={liveData?.questions}
-          shownQuestion={liveData?.shownQuestion}
+          questions={liveData?.questions?.filter((q: any) => q.componentId === comp.id)}
+          shownQuestion={liveData?.shownQuestion?.componentId === comp.id ? liveData.shownQuestion : null}
           dark={dark}
         />
       );
