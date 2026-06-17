@@ -7,6 +7,7 @@ import type {
   PollResult,
   RatingResult,
   ReportData,
+  ComponentReportSummary,
   Slide,
   InteractiveComponent,
   PollConfig,
@@ -14,6 +15,7 @@ import type {
   WordcloudConfig,
   QnaConfig,
   AudienceQuestion,
+  WordEntry,
 } from "../shared/types.js";
 import { sanitizeRatingConfig } from "../shared/types.js";
 
@@ -299,8 +301,58 @@ export function buildReport(presentationId: string, sessionId: string): ReportDa
       else if (c.type === "wordcloud") results = session.words[c.id] || [];
       else if (c.type === "rating") results = calculateRatingResult(session, c);
       else results = { questions: session.questions.filter((q) => q.componentId === c.id) };
-      return { componentId: c.id, type: c.type, prompt, results };
+      const summary = buildComponentSummary(session, c, results, totalAudience);
+      return { componentId: c.id, type: c.type, prompt, results, summary };
     }),
   }));
   return { presentation, session, totalAudience, slidesReport };
+}
+
+function buildComponentSummary(
+  session: Session,
+  component: InteractiveComponent,
+  results: PollResult | WordEntry[] | RatingResult | { questions: AudienceQuestion[] },
+  totalAudience: number,
+): ComponentReportSummary {
+  let totalSubmissions = 0;
+  let uniqueParticipants = 0;
+  const timestamps: string[] = [];
+
+  if (component.type === "poll") {
+    const r = results as PollResult;
+    totalSubmissions = r.optionCounts.reduce((s, c) => s + c, 0);
+    uniqueParticipants = r.totalResponses;
+    session.pollResponses
+      .filter((x) => x.componentId === component.id)
+      .forEach((x) => { if (x.timestamp) timestamps.push(x.timestamp); });
+  } else if (component.type === "wordcloud") {
+    const w = results as WordEntry[];
+    totalSubmissions = w.reduce((s, x) => s + x.count, 0);
+    uniqueParticipants = Math.min(totalSubmissions, totalAudience);
+  } else if (component.type === "rating") {
+    const r = results as RatingResult;
+    totalSubmissions = r.totalResponses;
+    uniqueParticipants = r.totalResponses;
+    session.ratingResponses
+      .filter((x) => x.componentId === component.id)
+      .forEach((x) => { if (x.timestamp) timestamps.push(x.timestamp); });
+  } else {
+    const q = (results as { questions: AudienceQuestion[] }).questions;
+    totalSubmissions = q.length;
+    uniqueParticipants = Math.min(q.length, totalAudience);
+    q.forEach((x) => { if (x.createdAt) timestamps.push(x.createdAt); });
+  }
+
+  timestamps.sort();
+  const completionRate = totalAudience > 0 ? Math.round((uniqueParticipants / totalAudience) * 100) : 0;
+  return {
+    componentId: component.id,
+    type: component.type,
+    prompt: (component.config as any).question || (component.config as any).prompt || (component.config as any).title || "",
+    totalSubmissions,
+    uniqueParticipants,
+    completionRate,
+    firstSubmissionAt: timestamps[0] || null,
+    lastSubmissionAt: timestamps[timestamps.length - 1] || null,
+  };
 }

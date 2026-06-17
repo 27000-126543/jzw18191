@@ -102,15 +102,29 @@ router.get("/:id/export/:sessionId/csv", (req: Request, res: Response) => {
   const report = buildReport(req.params.id, req.params.sessionId);
   if (!report) return res.status(404).json({ success: false, error: "报告数据不存在" });
   const lines: string[] = [];
-  lines.push(`互动演示数据报告 - ${report.presentation.title}`);
+  lines.push("=== 会话总览 ===");
+  lines.push(`演示标题,${report.presentation.title}`);
   lines.push(`总参与人数,${report.totalAudience}`);
   lines.push(`开始时间,${report.session.startedAt}`);
   lines.push(`结束时间,${report.session.endedAt ?? "进行中"}`);
   lines.push("");
-  lines.push("--- 投票/评分数据 ---");
+  lines.push("=== 各组件总览 ===");
+  lines.push("页面,组件类型,题目,提交量,参与人数,完成率(%),首次提交,最后提交");
   for (const slide of report.slidesReport) {
     for (const comp of slide.components) {
-      lines.push(`幻灯片${slide.slideIndex + 1}: ${slide.slideTitle} - ${comp.prompt}`);
+      const s = comp.summary;
+      const typeLabel: Record<string, string> = { poll: "投票", wordcloud: "词云", rating: "评分", qna: "问答" };
+      lines.push(
+        `第${slide.slideIndex + 1}页-${slide.slideTitle},${typeLabel[s.type] || s.type},"${s.prompt}",${s.totalSubmissions},${s.uniqueParticipants},${s.completionRate},${s.firstSubmissionAt ?? "-"},${s.lastSubmissionAt ?? "-"}`,
+      );
+    }
+  }
+  lines.push("");
+
+  for (const slide of report.slidesReport) {
+    for (const comp of slide.components) {
+      const typeLabel: Record<string, string> = { poll: "投票", wordcloud: "词云", rating: "评分", qna: "问答" };
+      lines.push(`=== 第${slide.slideIndex + 1}页 ${slide.slideTitle} - ${typeLabel[comp.type]}: ${comp.prompt} ===`);
       if (comp.type === "poll") {
         const r = comp.results as PollResult;
         lines.push(`参与人数,${r.totalResponses}`);
@@ -125,8 +139,7 @@ router.get("/:id/export/:sessionId/csv", (req: Request, res: Response) => {
         }
       } else if (comp.type === "rating") {
         const r = comp.results as RatingResult;
-        lines.push(`参与人数,${r.totalResponses}`);
-        lines.push(`平均分,${r.average}`);
+        lines.push(`参与人数,${r.totalResponses},平均分,${r.average},最高,${r.max},最低,${r.min}`);
         lines.push("分值,票数");
         r.distribution.forEach((d) => lines.push(`${d.rating},${d.count}`));
       } else if (comp.type === "wordcloud") {
@@ -136,7 +149,7 @@ router.get("/:id/export/:sessionId/csv", (req: Request, res: Response) => {
         w.forEach((x) => lines.push(`"${x.word}",${x.count}`));
       } else if (comp.type === "qna") {
         const q = (comp.results as { questions: AudienceQuestion[] }).questions;
-        lines.push(`问题总数,${q.length}`);
+        lines.push(`问题总数,${q.length},已回答,${q.filter((x) => x.isAnswered).length}`);
         lines.push("时间,内容,已展示,已回答");
         q.forEach((x) =>
           lines.push(`${x.createdAt},"${x.content.replace(/"/g, '""')}",${x.isShown},${x.isAnswered}`),

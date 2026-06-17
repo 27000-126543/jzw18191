@@ -1,6 +1,7 @@
 import { BarChart, Bar, XAxis, YAxis, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { Star } from "lucide-react";
 import type { RatingConfig, RatingResult } from "../../../shared/types";
+import { sanitizeRatingConfig } from "../../../shared/types";
 
 interface Props {
   config: RatingConfig;
@@ -9,16 +10,20 @@ interface Props {
 }
 
 export default function RatingDisplay({ config, result, dark = false }: Props) {
+  const safe = sanitizeRatingConfig(config);
   const hasData = result && result.totalResponses > 0;
   const avg = result?.average ?? 0;
   const total = result?.totalResponses ?? 0;
+  const stepCount = Math.max(1, Math.min(100, Math.floor((safe.max - safe.min) / safe.step) + 1));
+  const starCount = Math.min(10, stepCount);
+  const starFillRatio = avg / safe.max;
 
   return (
     <div className="w-full h-full flex flex-col gap-4 p-4">
       <h3
         className={`font-display text-xl md:text-2xl leading-tight ${dark ? "text-white" : "text-slate-800"}`}
       >
-        {config.title}
+        {safe.title}
       </h3>
       {!hasData ? (
         <div className="flex-1 flex items-center justify-center">
@@ -38,25 +43,31 @@ export default function RatingDisplay({ config, result, dark = false }: Props) {
               {avg.toFixed(2)}
             </div>
             <div className="flex gap-1">
-              {Array.from({ length: config.max }, (_, i) => (
-                <Star
-                  key={i}
-                  className={`w-6 h-6 transition-all ${
-                    i + 1 <= Math.round(avg)
-                      ? "fill-highlight-400 text-highlight-400"
-                      : dark
-                      ? "text-white/20"
-                      : "text-slate-200"
-                  }`}
-                />
-              ))}
+              {Array.from({ length: starCount }, (_, i) => {
+                const fill = (i + 1) / starCount <= starFillRatio;
+                const partial = !fill && i / starCount < starFillRatio;
+                return (
+                  <Star
+                    key={i}
+                    className={`w-6 h-6 transition-all ${
+                      fill
+                        ? "fill-highlight-400 text-highlight-400"
+                        : partial
+                        ? "fill-highlight-400/50 text-highlight-400/50"
+                        : dark
+                        ? "text-white/20"
+                        : "text-slate-200"
+                    }`}
+                  />
+                );
+              })}
             </div>
-            {(config.minLabel || config.maxLabel) && (
+            {(safe.minLabel || safe.maxLabel) && (
               <div
                 className={`flex justify-between w-full text-xs ${dark ? "text-white/50" : "text-slate-400"}`}
               >
-                <span>{config.minLabel}</span>
-                <span>{config.maxLabel}</span>
+                <span>{safe.minLabel}</span>
+                <span>{safe.maxLabel}</span>
               </div>
             )}
           </div>
@@ -66,7 +77,7 @@ export default function RatingDisplay({ config, result, dark = false }: Props) {
                 <XAxis
                   dataKey="rating"
                   type="number"
-                  domain={[config.min, config.max]}
+                  domain={[safe.min, safe.max]}
                   tick={{
                     fontSize: 12,
                     fill: dark ? "rgba(255,255,255,0.8)" : "#64748b",
@@ -111,7 +122,7 @@ export default function RatingDisplay({ config, result, dark = false }: Props) {
       )}
       {hasData && (
         <div className={`text-xs ${dark ? "text-white/60" : "text-slate-400"} text-center`}>
-          共 <span className="font-semibold">{total}</span> 人参与评分
+          共 <span className="font-semibold">{total}</span> 人参与评分 · 刻度 {safe.min}~{safe.max} 步长 {safe.step}
         </div>
       )}
     </div>

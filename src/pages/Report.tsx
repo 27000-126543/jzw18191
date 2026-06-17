@@ -11,6 +11,10 @@ import {
   Cloud,
   SlidersHorizontal,
   MessageCircle,
+  ChevronDown,
+  ChevronRight,
+  Clock,
+  TrendingUp,
 } from "lucide-react";
 import { api } from "../api/client";
 import type {
@@ -20,11 +24,13 @@ import type {
   WordEntry,
   AudienceQuestion,
   InteractiveComponent,
+  ComponentReportSummary,
   PollConfig,
   WordcloudConfig,
   RatingConfig,
   QnaConfig,
 } from "../../shared/types";
+import { sanitizeRatingConfig } from "../../shared/types";
 import PollDisplay from "../components/interactive/PollDisplay";
 import WordcloudDisplay from "../components/interactive/WordcloudDisplay";
 import RatingDisplay from "../components/interactive/RatingDisplay";
@@ -38,7 +44,22 @@ interface FlattenedReportComponent {
   prompt: string;
   config: PollConfig | WordcloudConfig | RatingConfig | QnaConfig;
   results: PollResult | WordEntry[] | RatingResult | { questions: AudienceQuestion[] };
+  summary: ComponentReportSummary;
 }
+
+const TYPE_LABELS: Record<string, string> = { poll: "投票", wordcloud: "词云", rating: "评分", qna: "问答" };
+const TYPE_ICONS: Record<string, React.ReactNode> = {
+  poll: <Vote className="w-3.5 h-3.5" />,
+  wordcloud: <Cloud className="w-3.5 h-3.5" />,
+  rating: <SlidersHorizontal className="w-3.5 h-3.5" />,
+  qna: <MessageCircle className="w-3.5 h-3.5" />,
+};
+const TYPE_CHIP: Record<string, string> = {
+  poll: "bg-primary-100 text-primary-700",
+  wordcloud: "bg-accent-100 text-accent-700",
+  rating: "bg-highlight-100 text-highlight-700",
+  qna: "bg-purple-100 text-purple-700",
+};
 
 export default function Report() {
   const { presentationId, sessionId } = useParams<{ presentationId: string; sessionId: string }>();
@@ -46,6 +67,7 @@ export default function Report() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [report, setReport] = useState<ReportData | null>(null);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!presentationId || !sessionId) return;
@@ -66,6 +88,15 @@ export default function Report() {
   function exportCsv() {
     if (!presentationId || !sessionId) return;
     api.exportCsv(presentationId, sessionId);
+  }
+
+  function toggleExpand(cid: string) {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(cid)) next.delete(cid);
+      else next.add(cid);
+      return next;
+    });
   }
 
   const { flattenedComponents, stats } = useMemo(() => {
@@ -92,6 +123,7 @@ export default function Report() {
             prompt: c.prompt,
             config: cfg,
             results: c.results,
+            summary: c.summary,
           });
         }
       }
@@ -127,6 +159,11 @@ export default function Report() {
         ? ratings.reduce((s, r) => s + (r.results as RatingResult).average, 0) / ratings.length
         : 0;
 
+    const avgCompletion =
+      flattened.length > 0
+        ? Math.round(flattened.reduce((s, c) => s + c.summary.completionRate, 0) / flattened.length)
+        : 0;
+
     return {
       flattenedComponents: flattened,
       stats: {
@@ -139,6 +176,7 @@ export default function Report() {
         totalQuestions,
         answeredQuestions,
         avgRating,
+        avgCompletion,
       },
     };
   }, [report]);
@@ -191,18 +229,25 @@ export default function Report() {
             onClick={exportCsv}
             className="btn-primary py-2.5 px-5 inline-flex items-center gap-1.5 text-sm"
           >
-            <Download className="w-4 h-4" /> 导出数据
+            <Download className="w-4 h-4" /> 导出 CSV
           </button>
         </div>
       </header>
 
       <main className="max-w-5xl mx-auto px-6 py-8 space-y-8">
-        <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <section className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <StatCard
             icon={<Users className="w-5 h-5" />}
             color="primary"
             label="参与观众"
             value={stats.totalParticipants}
+          />
+          <StatCard
+            icon={<TrendingUp className="w-5 h-5" />}
+            color="accent"
+            label="平均完成率"
+            value={stats.avgCompletion}
+            sub="%"
           />
           <StatCard
             icon={<Vote className="w-5 h-5" />}
@@ -229,229 +274,224 @@ export default function Report() {
 
         <section>
           <h2 className="font-display text-2xl text-slate-800 mb-4 flex items-center gap-2">
+            <BarChart3 className="w-5 h-5 text-primary-600" /> 会话总览
+          </h2>
+          <div className="card overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100 bg-slate-50/60">
+                    <th className="text-left px-4 py-3 font-semibold text-slate-500 text-xs uppercase tracking-wider">页面</th>
+                    <th className="text-left px-4 py-3 font-semibold text-slate-500 text-xs uppercase tracking-wider">组件</th>
+                    <th className="text-left px-4 py-3 font-semibold text-slate-500 text-xs uppercase tracking-wider">题目</th>
+                    <th className="text-right px-4 py-3 font-semibold text-slate-500 text-xs uppercase tracking-wider">提交量</th>
+                    <th className="text-right px-4 py-3 font-semibold text-slate-500 text-xs uppercase tracking-wider">参与人数</th>
+                    <th className="text-center px-4 py-3 font-semibold text-slate-500 text-xs uppercase tracking-wider">完成率</th>
+                    <th className="text-left px-4 py-3 font-semibold text-slate-500 text-xs uppercase tracking-wider">时间分布</th>
+                    <th className="text-center px-4 py-3 font-semibold text-slate-500 text-xs uppercase tracking-wider w-12"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {flattenedComponents.map((comp) => {
+                    const expanded = expandedIds.has(comp.componentId);
+                    const s = comp.summary;
+                    return (
+                      <OverviewRow
+                        key={comp.componentId}
+                        comp={comp}
+                        expanded={expanded}
+                        onToggle={() => toggleExpand(comp.componentId)}
+                      />
+                    );
+                  })}
+                  {flattenedComponents.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="px-4 py-10 text-center text-slate-400">
+                        本次演示未包含互动组件
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2 className="font-display text-2xl text-slate-800 mb-4 flex items-center gap-2">
             <BarChart3 className="w-5 h-5 text-primary-600" /> 互动题详情
           </h2>
-          <div className="space-y-6">
+          <div className="space-y-4">
             {flattenedComponents.map((comp, idx) => (
               <div
                 key={comp.componentId}
-                className="card p-6 animate-slide-up"
-                style={{ animationDelay: `${idx * 40}ms` }}
+                className="card overflow-hidden animate-slide-up"
+                style={{ animationDelay: `${idx * 30}ms` }}
               >
-                <div className="flex items-start justify-between gap-4 mb-5">
-                  <div className="flex items-start gap-3">
-                    <div className="flex flex-col items-center shrink-0">
-                      <span className="text-xs text-slate-400 font-bold">SLIDE</span>
-                      <span className="font-display text-2xl text-primary-600 leading-none">
-                        {comp.slideIndex + 1}
+                <button
+                  onClick={() => toggleExpand(comp.componentId)}
+                  className="w-full text-left p-5 flex items-center gap-4 hover:bg-slate-50/60 transition"
+                >
+                  <div className="flex flex-col items-center shrink-0">
+                    <span className="text-[10px] text-slate-400 font-bold">SLIDE</span>
+                    <span className="font-display text-2xl text-primary-600 leading-none">
+                      {comp.slideIndex + 1}
+                    </span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`chip ${TYPE_CHIP[comp.type]}`}>
+                        {TYPE_ICONS[comp.type]} {TYPE_LABELS[comp.type]}
                       </span>
+                      {comp.type === "poll" && (comp.config as PollConfig).multiSelect && (
+                        <span className="chip bg-slate-100 text-slate-500">多选</span>
+                      )}
+                      {comp.type === "qna" && (comp.config as QnaConfig).anonymous && (
+                        <span className="chip bg-slate-100 text-slate-500">匿名</span>
+                      )}
                     </div>
+                    <h3 className="font-display text-lg text-slate-800 leading-tight truncate">
+                      {comp.prompt}
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">{comp.slideTitle}</p>
+                  </div>
+                  <div className="flex items-center gap-6 shrink-0 text-right">
                     <div>
+                      <div className="font-display text-2xl text-slate-700">
+                        {comp.summary.totalSubmissions}
+                      </div>
+                      <div className="text-[10px] text-slate-400">提交量</div>
+                    </div>
+                    <div className="w-14">
+                      <div className="font-display text-2xl text-primary-600">
+                        {comp.summary.completionRate}%
+                      </div>
+                      <div className="text-[10px] text-slate-400">完成率</div>
+                    </div>
+                    <div className="text-slate-400">
+                      {expandedIds.has(comp.componentId) ? (
+                        <ChevronDown className="w-5 h-5" />
+                      ) : (
+                        <ChevronRight className="w-5 h-5" />
+                      )}
+                    </div>
+                  </div>
+                </button>
+
+                {expandedIds.has(comp.componentId) && (
+                  <div className="border-t border-slate-100 p-5 bg-slate-50/40 animate-fade-in">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+                      <MiniStat label="提交量" value={comp.summary.totalSubmissions} />
+                      <MiniStat label="参与人数" value={comp.summary.uniqueParticipants} />
+                      <MiniStat label="完成率" value={`${comp.summary.completionRate}%`} />
+                      <MiniStat
+                        label="时间跨度"
+                        value={
+                          comp.summary.firstSubmissionAt
+                            ? `${formatTime(comp.summary.firstSubmissionAt)} ~ ${formatTime(comp.summary.lastSubmissionAt!)}`
+                            : "无数据"
+                        }
+                      />
+                    </div>
+                    <div className="bg-white rounded-2xl p-5 border border-slate-100">
                       {comp.type === "poll" && (
-                        <>
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="chip bg-primary-100 text-primary-700">
-                              <Vote className="w-3 h-3" /> 选择题投票
-                            </span>
-                            {(comp.config as PollConfig).multiSelect && (
-                              <span className="chip bg-slate-100 text-slate-500">多选</span>
-                            )}
-                          </div>
-                          <h3 className="font-display text-lg text-slate-800 leading-tight">
-                            {comp.prompt}
-                          </h3>
-                        </>
+                        <PollDisplay
+                          config={comp.config as PollConfig}
+                          result={comp.results as PollResult}
+                        />
                       )}
                       {comp.type === "wordcloud" && (
-                        <>
-                          <div className="mb-1">
-                            <span className="chip bg-accent-100 text-accent-700">
-                              <Cloud className="w-3 h-3" /> 词云
-                            </span>
-                          </div>
-                          <h3 className="font-display text-lg text-slate-800 leading-tight">
-                            {comp.prompt}
-                          </h3>
-                        </>
+                        <WordcloudDisplay
+                          config={comp.config as WordcloudConfig}
+                          words={comp.results as WordEntry[]}
+                        />
                       )}
                       {comp.type === "rating" && (
-                        <>
-                          <div className="mb-1">
-                            <span className="chip bg-highlight-100 text-highlight-700">
-                              <SlidersHorizontal className="w-3 h-3" /> 评分
-                            </span>
-                          </div>
-                          <h3 className="font-display text-lg text-slate-800 leading-tight">
-                            {comp.prompt}
-                          </h3>
-                        </>
+                        <RatingDisplay
+                          config={comp.config as RatingConfig}
+                          result={comp.results as RatingResult}
+                        />
                       )}
                       {comp.type === "qna" && (
-                        <>
-                          <div className="mb-1 flex items-center gap-2">
-                            <span className="chip bg-purple-100 text-purple-700">
-                              <MessageCircle className="w-3 h-3" /> 问答
-                            </span>
-                            {(comp.config as QnaConfig).anonymous && (
-                              <span className="chip bg-slate-100 text-slate-500">匿名</span>
-                            )}
-                          </div>
-                          <h3 className="font-display text-lg text-slate-800 leading-tight">
-                            {comp.prompt}
-                          </h3>
-                        </>
+                        <QnaDisplay
+                          config={comp.config as QnaConfig}
+                          questions={(comp.results as { questions: AudienceQuestion[] }).questions}
+                          shownQuestion={null}
+                          compact
+                        />
                       )}
-                      <p className="text-xs text-slate-400 mt-1">所属页面：{comp.slideTitle}</p>
                     </div>
-                  </div>
-                  <div className="text-right shrink-0">
+
                     {comp.type === "poll" && (
-                      <>
-                        <div className="font-display text-3xl text-primary-600 leading-tight">
-                          {(comp.results as PollResult).totalResponses}
+                      <div className="mt-4 pt-4 border-t border-slate-100">
+                        <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">详细分布</p>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                          {(comp.config as PollConfig).options.map((opt, i) => (
+                            <div key={i} className="p-3 rounded-xl bg-white border border-slate-100">
+                              <div className="text-sm font-medium text-slate-700 truncate">{opt}</div>
+                              <div className="flex items-baseline gap-1.5 mt-1">
+                                <span className="font-display text-xl text-primary-600">
+                                  {(comp.results as PollResult).optionPercentages[i]}%
+                                </span>
+                                <span className="text-xs text-slate-400">
+                                  ({(comp.results as PollResult).optionCounts[i]} 票)
+                                </span>
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                        <div className="text-xs text-slate-400">投票人次</div>
-                      </>
+                      </div>
                     )}
-                    {comp.type === "wordcloud" && (
-                      <>
-                        <div className="font-display text-3xl text-accent-600 leading-tight">
-                          {(comp.results as WordEntry[]).reduce((s, w) => s + w.count, 0)}
+
+                    {comp.type === "wordcloud" && (comp.results as WordEntry[]).length > 0 && (
+                      <div className="mt-4 pt-4 border-t border-slate-100">
+                        <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">关键词排名 TOP 10</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {(comp.results as WordEntry[])
+                            .sort((a, b) => b.count - a.count)
+                            .slice(0, 10)
+                            .map((w, i) => (
+                              <div
+                                key={w.word}
+                                className="px-3 py-1.5 rounded-full bg-gradient-to-r from-accent-50 to-primary-50 border border-accent-100 text-sm"
+                              >
+                                <span className="text-xs text-slate-400 font-bold mr-1">#{i + 1}</span>
+                                <span className="font-semibold text-slate-700">{w.word}</span>
+                                <span className="ml-1.5 text-accent-600 font-bold">×{w.count}</span>
+                              </div>
+                            ))}
                         </div>
-                        <div className="text-xs text-slate-400">关键词数</div>
-                      </>
+                      </div>
                     )}
+
                     {comp.type === "rating" && (
-                      <>
-                        <div className="font-display text-3xl text-highlight-600 leading-tight">
-                          {(comp.results as RatingResult).average.toFixed(2)}
-                        </div>
-                        <div className="text-xs text-slate-400">平均分</div>
-                      </>
-                    )}
-                    {comp.type === "qna" && (
-                      <>
-                        <div className="flex items-center justify-end gap-3">
-                          <div>
-                            <div className="font-display text-2xl text-purple-600 leading-tight">
-                              {(comp.results as { questions: AudienceQuestion[] }).questions.length}
+                      <div className="mt-4 pt-4 border-t border-slate-100">
+                        <div className="grid grid-cols-3 gap-3 text-center">
+                          <div className="p-3 rounded-xl bg-white border border-slate-100">
+                            <div className="text-xs text-slate-400 mb-1">最高分</div>
+                            <div className="font-display text-xl text-highlight-600">
+                              {(comp.results as RatingResult).max}
                             </div>
-                            <div className="text-[10px] text-slate-400">总问题</div>
                           </div>
-                          <div>
-                            <div className="font-display text-2xl text-green-600 leading-tight">
-                              {
-                                (comp.results as { questions: AudienceQuestion[] }).questions.filter(
-                                  (q) => q.isAnswered,
-                                ).length
-                              }
+                          <div className="p-3 rounded-xl bg-white border border-slate-100">
+                            <div className="text-xs text-slate-400 mb-1">最低分</div>
+                            <div className="font-display text-xl text-highlight-600">
+                              {(comp.results as RatingResult).min}
                             </div>
-                            <div className="text-[10px] text-slate-400">已回答</div>
+                          </div>
+                          <div className="p-3 rounded-xl bg-white border border-slate-100">
+                            <div className="text-xs text-slate-400 mb-1">参与人数</div>
+                            <div className="font-display text-xl text-highlight-600">
+                              {(comp.results as RatingResult).totalResponses}
+                            </div>
                           </div>
                         </div>
-                      </>
+                      </div>
                     )}
-                  </div>
-                </div>
-
-                <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100">
-                  {comp.type === "poll" && (
-                    <PollDisplay
-                      config={comp.config as PollConfig}
-                      result={comp.results as PollResult}
-                    />
-                  )}
-                  {comp.type === "wordcloud" && (
-                    <WordcloudDisplay
-                      config={comp.config as WordcloudConfig}
-                      words={comp.results as WordEntry[]}
-                    />
-                  )}
-                  {comp.type === "rating" && (
-                    <RatingDisplay
-                      config={comp.config as RatingConfig}
-                      result={comp.results as RatingResult}
-                    />
-                  )}
-                  {comp.type === "qna" && (
-                    <QnaDisplay
-                      config={comp.config as QnaConfig}
-                      questions={(comp.results as { questions: AudienceQuestion[] }).questions}
-                      shownQuestion={null}
-                      compact
-                    />
-                  )}
-                </div>
-
-                {comp.type === "poll" && (
-                  <div className="mt-4 pt-4 border-t border-slate-100">
-                    <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">详细分布</p>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                      {(comp.config as PollConfig).options.map((opt, i) => (
-                        <div key={i} className="p-3 rounded-xl bg-white border border-slate-100">
-                          <div className="text-sm font-medium text-slate-700 truncate">{opt}</div>
-                          <div className="flex items-baseline gap-1.5 mt-1">
-                            <span className="font-display text-xl text-primary-600">
-                              {(comp.results as PollResult).optionPercentages[i]}%
-                            </span>
-                            <span className="text-xs text-slate-400">
-                              ({(comp.results as PollResult).optionCounts[i]} 票)
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {comp.type === "wordcloud" && (comp.results as WordEntry[]).length > 0 && (
-                  <div className="mt-4 pt-4 border-t border-slate-100">
-                    <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">关键词排名 TOP 10</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {(comp.results as WordEntry[])
-                        .sort((a, b) => b.count - a.count)
-                        .slice(0, 10)
-                        .map((w, i) => (
-                          <div
-                            key={w.word}
-                            className="px-3 py-1.5 rounded-full bg-gradient-to-r from-accent-50 to-primary-50 border border-accent-100 text-sm"
-                          >
-                            <span className="text-xs text-slate-400 font-bold mr-1">#{i + 1}</span>
-                            <span className="font-semibold text-slate-700">{w.word}</span>
-                            <span className="ml-1.5 text-accent-600 font-bold">×{w.count}</span>
-                          </div>
-                        ))}
-                    </div>
-                  </div>
-                )}
-
-                {comp.type === "rating" && (
-                  <div className="mt-4 pt-4 border-t border-slate-100">
-                    <div className="grid grid-cols-3 gap-3 text-center">
-                      <div className="p-3 rounded-xl bg-white border border-slate-100">
-                        <div className="text-xs text-slate-400 mb-1">最高分</div>
-                        <div className="font-display text-xl text-highlight-600">
-                          {(comp.results as RatingResult).max}
-                        </div>
-                      </div>
-                      <div className="p-3 rounded-xl bg-white border border-slate-100">
-                        <div className="text-xs text-slate-400 mb-1">最低分</div>
-                        <div className="font-display text-xl text-highlight-600">
-                          {(comp.results as RatingResult).min}
-                        </div>
-                      </div>
-                      <div className="p-3 rounded-xl bg-white border border-slate-100">
-                        <div className="text-xs text-slate-400 mb-1">参与人数</div>
-                        <div className="font-display text-xl text-highlight-600">
-                          {(comp.results as RatingResult).totalResponses}
-                        </div>
-                      </div>
-                    </div>
                   </div>
                 )}
               </div>
             ))}
-
             {flattenedComponents.length === 0 && (
               <div className="card p-10 text-center">
                 <Sparkles className="w-12 h-12 mx-auto text-slate-300 mb-3" />
@@ -466,6 +506,77 @@ export default function Report() {
           {new Date(report.session.endedAt || Date.now()).toLocaleString()}
         </footer>
       </main>
+    </div>
+  );
+}
+
+function OverviewRow({
+  comp,
+  expanded,
+  onToggle,
+}: {
+  comp: FlattenedReportComponent;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const s = comp.summary;
+  return (
+    <tr className={`border-b border-slate-50 hover:bg-slate-50/60 transition ${expanded ? "bg-primary-50/20" : ""}`}>
+      <td className="px-4 py-3">
+        <span className="font-display text-base text-primary-600">{comp.slideIndex + 1}</span>
+        <span className="text-slate-400 ml-1.5 text-xs">{comp.slideTitle}</span>
+      </td>
+      <td className="px-4 py-3">
+        <span className={`chip text-xs ${TYPE_CHIP[comp.type]}`}>
+          {TYPE_ICONS[comp.type]} {TYPE_LABELS[comp.type]}
+        </span>
+      </td>
+      <td className="px-4 py-3 max-w-[200px]">
+        <span className="text-slate-700 font-medium truncate block">{s.prompt}</span>
+      </td>
+      <td className="px-4 py-3 text-right font-display text-base text-slate-700">{s.totalSubmissions}</td>
+      <td className="px-4 py-3 text-right font-display text-base text-slate-700">{s.uniqueParticipants}</td>
+      <td className="px-4 py-3 text-center">
+        <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-bold ${
+          s.completionRate >= 70 ? "bg-green-100 text-green-700" :
+          s.completionRate >= 40 ? "bg-yellow-100 text-yellow-700" :
+          "bg-red-100 text-red-700"
+        }`}>
+          {s.completionRate}%
+        </span>
+      </td>
+      <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
+        {s.firstSubmissionAt ? (
+          <span className="inline-flex items-center gap-1">
+            <Clock className="w-3 h-3" />
+            {formatTime(s.firstSubmissionAt)} ~ {formatTime(s.lastSubmissionAt!)}
+          </span>
+        ) : (
+          <span className="text-slate-300">-</span>
+        )}
+      </td>
+      <td className="px-4 py-3 text-center">
+        <button onClick={onToggle} className="p-1 rounded hover:bg-slate-100 text-slate-400 transition">
+          {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+        </button>
+      </td>
+    </tr>
+  );
+}
+
+function formatTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return "-";
+  }
+}
+
+function MiniStat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="p-3 rounded-xl bg-white border border-slate-100 text-center">
+      <div className="font-display text-xl text-slate-700 leading-tight">{value}</div>
+      <div className="text-[10px] text-slate-400 mt-0.5">{label}</div>
     </div>
   );
 }
@@ -500,13 +611,15 @@ function StatCard({
       <div className="flex items-start justify-between mb-3">
         <span className={`p-2.5 rounded-xl ${bgColors[color]}`}>{icon}</span>
       </div>
-      <div
-        className={`font-display text-3xl bg-gradient-to-br ${colors[color]} bg-clip-text text-transparent leading-tight`}
-      >
-        {value}
+      <div className="flex items-baseline gap-1">
+        <div
+          className={`font-display text-3xl bg-gradient-to-br ${colors[color]} bg-clip-text text-transparent leading-tight`}
+        >
+          {value}
+        </div>
+        {sub && <span className="text-sm text-slate-400">{sub}</span>}
       </div>
       <div className="text-sm text-slate-500 mt-1">{label}</div>
-      {sub && <div className="text-[11px] text-slate-400 mt-0.5">{sub}</div>}
     </div>
   );
 }

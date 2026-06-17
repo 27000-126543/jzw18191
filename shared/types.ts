@@ -22,9 +22,14 @@ export interface RatingConfig {
 
 export function sanitizeRatingConfig(cfg: RatingConfig): RatingConfig {
   let { min, max, step } = cfg;
-  if (typeof min !== "number" || isNaN(min)) min = 1;
-  if (typeof max !== "number" || isNaN(max)) max = 5;
-  if (typeof step !== "number" || isNaN(step) || step <= 0) step = 1;
+  if (typeof min !== "number" || isNaN(min) || !isFinite(min)) min = 1;
+  if (typeof max !== "number" || isNaN(max) || !isFinite(max)) max = 5;
+  if (typeof step !== "number" || isNaN(step) || !isFinite(step) || step <= 0) step = 1;
+  min = Math.round(min * 100) / 100;
+  max = Math.round(max * 100) / 100;
+  step = Math.round(step * 100) / 100;
+  if (min < -9999) min = -9999;
+  if (max > 9999) max = 9999;
   if (min >= max) {
     max = min + step;
   }
@@ -134,6 +139,17 @@ export interface RatingResult {
   distribution: { rating: number; count: number }[];
 }
 
+export interface ComponentReportSummary {
+  componentId: string;
+  type: InteractiveType;
+  prompt: string;
+  totalSubmissions: number;
+  uniqueParticipants: number;
+  completionRate: number;
+  firstSubmissionAt: string | null;
+  lastSubmissionAt: string | null;
+}
+
 export interface ReportData {
   presentation: Presentation;
   session: Session;
@@ -146,6 +162,7 @@ export interface ReportData {
       type: InteractiveType;
       prompt: string;
       results: PollResult | WordEntry[] | RatingResult | { questions: AudienceQuestion[] };
+      summary: ComponentReportSummary;
     }[];
   }[];
 }
