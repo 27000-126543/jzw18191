@@ -1,0 +1,130 @@
+export type InteractiveType = "poll" | "wordcloud" | "qna" | "rating";
+
+export interface PollConfig {
+  question: string;
+  options: string[];
+  multiSelect: boolean;
+}
+
+export interface WordcloudConfig {
+  prompt: string;
+  maxWords?: number;
+}
+
+export interface RatingConfig {
+  title: string;
+  minLabel?: string;
+  maxLabel?: string;
+  min: number;
+  max: number;
+  step: number;
+}
+
+export interface QnaConfig {
+  prompt: string;
+  anonymous: boolean;
+}
+
+export interface InteractiveComponent {
+  id: string;
+  type: InteractiveType;
+  config: PollConfig | WordcloudConfig | RatingConfig | QnaConfig;
+  position?: { x: number; y: number; width: number; height: number };
+}
+
+export interface Slide {
+  id: string;
+  index: number;
+  title: string;
+  content: string;
+  background?: string;
+  components: InteractiveComponent[];
+}
+
+export interface Presentation {
+  id: string;
+  title: string;
+  slides: Slide[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PollResponse {
+  id: string;
+  componentId: string;
+  audienceId: string;
+  optionIndices: number[];
+  timestamp: string;
+}
+
+export interface WordEntry {
+  word: string;
+  count: number;
+  componentId: string;
+}
+
+export interface RatingResponse {
+  id: string;
+  componentId: string;
+  audienceId: string;
+  rating: number;
+  timestamp: string;
+}
+
+export interface AudienceQuestion {
+  id: string;
+  sessionId: string;
+  content: string;
+  isShown: boolean;
+  isAnswered: boolean;
+  createdAt: string;
+  audienceId?: string;
+}
+
+export interface Session {
+  id: string;
+  presentationId: string;
+  roomCode: string;
+  startedAt: string;
+  endedAt?: string;
+  currentSlide: number;
+  paused: boolean;
+  pollResponses: PollResponse[];
+  words: Record<string, WordEntry[]>;
+  ratingResponses: RatingResponse[];
+  questions: AudienceQuestion[];
+  audienceIds: string[];
+}
+
+export interface PollResult {
+  componentId: string;
+  totalResponses: number;
+  optionCounts: number[];
+  optionPercentages: number[];
+  multiSelect: boolean;
+}
+
+export interface RatingResult {
+  componentId: string;
+  totalResponses: number;
+  average: number;
+  min: number;
+  max: number;
+  distribution: { rating: number; count: number }[];
+}
+
+export interface ReportData {
+  presentation: Presentation;
+  session: Session;
+  totalAudience: number;
+  slidesReport: {
+    slideIndex: number;
+    slideTitle: string;
+    components: {
+      componentId: string;
+      type: InteractiveType;
+      prompt: string;
+      results: PollResult | WordEntry[] | RatingResult | { questions: AudienceQuestion[] };
+    }[];
+  }[];
+}

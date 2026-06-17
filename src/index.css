@@ -1,0 +1,99 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+  }
+  body {
+    font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+    background-color: #f8fafc;
+    color: #0f172a;
+  }
+  .font-display {
+    font-family: "DM Serif Display", serif;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-white/70 backdrop-blur-md border border-white/40 shadow-soft;
+  }
+  .gradient-text {
+    @apply bg-gradient-to-r from-primary-600 via-primary-500 to-accent-500 bg-clip-text text-transparent;
+  }
+  .btn-primary {
+    @apply bg-gradient-to-r from-primary-600 to-primary-700 text-white px-5 py-2.5 rounded-lg
+           font-semibold shadow-lg shadow-primary-600/20 hover:shadow-xl hover:shadow-primary-600/30
+           transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0;
+  }
+  .btn-secondary {
+    @apply bg-accent-500 text-white px-5 py-2.5 rounded-lg font-semibold shadow-lg
+           shadow-accent-500/20 hover:bg-accent-600 transition-all duration-200 hover:-translate-y-0.5;
+  }
+  .btn-outline {
+    @apply border-2 border-primary-200 text-primary-700 bg-white px-5 py-2.5 rounded-lg
+           font-semibold hover:bg-primary-50 hover:border-primary-400 transition-all duration-200;
+  }
+  .btn-ghost {
+    @apply text-slate-600 px-4 py-2 rounded-lg hover:bg-slate-100 transition-all duration-200;
+  }
+  .input-field {
+    @apply w-full px-4 py-2.5 bg-white border-2 border-slate-200 rounded-lg text-slate-800
+           placeholder:text-slate-400 focus:outline-none focus:border-primary-400
+           focus:ring-4 focus:ring-primary-100 transition-all;
+  }
+  .card {
+    @apply bg-white rounded-2xl shadow-soft border border-slate-100;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 3px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+  }
+  .bg-mesh {
+    background-image:
+      radial-gradient(at 20% 10%, rgba(99,102,241,0.15) 0px, transparent 50%),
+      radial-gradient(at 80% 20%, rgba(13,148,136,0.12) 0px, transparent 50%),
+      radial-gradient(at 60% 80%, rgba(249,115,22,0.1) 0px, transparent 50%);
+  }
+  .text-shadow-soft {
+    text-shadow: 0 2px 20px rgba(0,0,0,0.15);
+  }
+}
+
+.particle-burst {
+  position: relative;
+}
+.particle-burst::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 20% 30%, rgba(99,102,241,0.6) 0, transparent 30%),
+    radial-gradient(circle at 80% 70%, rgba(13,148,136,0.6) 0, transparent 30%);
+  animation: burst 0.6s ease-out forwards;
+  pointer-events: none;
+}
+@keyframes burst {
+  0% { transform: scale(0); opacity: 0.8; }
+  100% { transform: scale(2); opacity: 0; }
+}
