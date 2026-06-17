@@ -1,5 +1,5 @@
-import type { Slide, InteractiveComponent } from "../../shared/types";
-import type { PollResult, RatingResult, WordEntry, AudienceQuestion } from "../../shared/types";
+import type { Slide, InteractiveComponent, WordcloudUpdateData } from "../../shared/types";
+import type { PollResult, RatingResult, AudienceQuestion } from "../../shared/types";
 import PollDisplay from "./interactive/PollDisplay";
 import WordcloudDisplay from "./interactive/WordcloudDisplay";
 import RatingDisplay from "./interactive/RatingDisplay";
@@ -10,7 +10,7 @@ interface Props {
   dark?: boolean;
   liveData?: {
     pollResults: Record<string, PollResult>;
-    wordclouds: Record<string, WordEntry[]>;
+    wordclouds: Record<string, WordcloudUpdateData>;
     ratingResults: Record<string, RatingResult>;
     questions: AudienceQuestion[];
     shownQuestion: AudienceQuestion | null;
@@ -52,7 +52,7 @@ function renderComponent(
       return (
         <WordcloudDisplay
           config={comp.config as any}
-          words={liveData?.wordclouds[comp.id]}
+          words={liveData?.wordclouds[comp.id]?.words}
           dark={dark}
         />
       );

@@ -17,6 +17,7 @@ import type {
   AudienceQuestion,
   PollConfig,
   WordEntry,
+  AggregatedWord,
 } from "../shared/types.js";
 
 let io: IOServer | null = null;
@@ -31,12 +32,26 @@ function getPresentationBySession(session: Session) {
   return presentations.get(session.presentationId);
 }
 
-function aggregateWordcloud(entries: WordEntry[]): { word: string; count: number }[] {
+function aggregateWordcloud(entries: WordEntry[]): { words: AggregatedWord[]; uniqueParticipants: number; recentCount: number } {
   const map = new Map<string, number>();
+  const audienceSet = new Set<string>();
+  const now = Date.now();
+  let recentCount = 0;
+
   for (const e of entries) {
     map.set(e.word, (map.get(e.word) ?? 0) + e.count);
+    if (e.audienceId) audienceSet.add(e.audienceId);
+    if (e.timestamp) {
+      const diff = now - new Date(e.timestamp).getTime();
+      if (diff < 30000) recentCount++;
+    }
   }
-  return Array.from(map, ([word, count]) => ({ word, count }));
+
+  return {
+    words: Array.from(map, ([word, count]) => ({ word, count })),
+    uniqueParticipants: audienceSet.size,
+    recentCount,
+  };
 }
 
 export function setupSocket(server: HTTPServer): void {
@@ -218,8 +233,21 @@ export function setupSocket(server: HTTPServer): void {
         const comp = findComponentById(presentation, componentId);
         if (comp) {
           const result = calculatePollResult(session, comp);
-          io?.to(`aud:${session.id}`).emit("poll:update", { componentId, results: result });
-          io?.to(`pres:${session.id}`).emit("poll:update", { componentId, results: result });
+          let topOption: { index: number; ratio: number; option: string } | null = null;
+          if (result.totalResponses > 0) {
+            const maxCount = Math.max(...result.optionCounts);
+            const maxIndex = result.optionCounts.indexOf(maxCount);
+            const ratio = maxCount / result.totalResponses;
+            const cfg = comp.config as PollConfig;
+            topOption = {
+              index: maxIndex,
+              ratio: Math.round(ratio * 100),
+              option: cfg.options[maxIndex] || "",
+            };
+          }
+          const pollData = { componentId, results: result, topOption };
+          io?.to(`aud:${session.id}`).emit("poll:update", pollData);
+          io?.to(`pres:${session.id}`).emit("poll:update", pollData);
         }
       },
     );
@@ -244,8 +272,15 @@ export function setupSocket(server: HTTPServer): void {
         });
         const agg = aggregateWordcloud(list);
         persistSessions();
-        io?.to(`aud:${session.id}`).emit("wordcloud:update", { componentId, words: agg });
-        io?.to(`pres:${session.id}`).emit("wordcloud:update", { componentId, words: agg });
+        const wordData = {
+          componentId,
+          words: agg.words,
+          uniqueParticipants: agg.uniqueParticipants,
+          recentCount: agg.recentCount,
+          rawCount: list.length,
+        };
+        io?.to(`aud:${session.id}`).emit("wordcloud:update", wordData);
+        io?.to(`pres:${session.id}`).emit("wordcloud:update", wordData);
       },
     );
 
@@ -326,13 +361,33 @@ function broadcastCurrentResults(session: Session, components: InteractiveCompon
   for (const comp of components) {
     if (comp.type === "poll") {
       const r = calculatePollResult(session, comp);
-      io?.to(`aud:${session.id}`).emit("poll:update", { componentId: comp.id, results: r });
-      io?.to(`pres:${session.id}`).emit("poll:update", { componentId: comp.id, results: r });
+      let topOption: { index: number; ratio: number; option: string } | null = null;
+      if (r.totalResponses > 0) {
+        const maxCount = Math.max(...r.optionCounts);
+        const maxIndex = r.optionCounts.indexOf(maxCount);
+        const ratio = maxCount / r.totalResponses;
+        const cfg = comp.config as PollConfig;
+        topOption = {
+          index: maxIndex,
+          ratio: Math.round(ratio * 100),
+          option: cfg.options[maxIndex] || "",
+        };
+      }
+      const pollData = { componentId: comp.id, results: r, topOption };
+      io?.to(`aud:${session.id}`).emit("poll:update", pollData);
+      io?.to(`pres:${session.id}`).emit("poll:update", pollData);
     } else if (comp.type === "wordcloud") {
       const w = session.words[comp.id] ?? [];
       const agg = aggregateWordcloud(w);
-      io?.to(`aud:${session.id}`).emit("wordcloud:update", { componentId: comp.id, words: agg });
-      io?.to(`pres:${session.id}`).emit("wordcloud:update", { componentId: comp.id, words: agg });
+      const wordData = {
+        componentId: comp.id,
+        words: agg.words,
+        uniqueParticipants: agg.uniqueParticipants,
+        recentCount: agg.recentCount,
+        rawCount: w.length,
+      };
+      io?.to(`aud:${session.id}`).emit("wordcloud:update", wordData);
+      io?.to(`pres:${session.id}`).emit("wordcloud:update", wordData);
     } else if (comp.type === "rating") {
       const r = calculateRatingResult(session, comp);
       io?.to(`aud:${session.id}`).emit("rating:update", { componentId: comp.id, results: r });

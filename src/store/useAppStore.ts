@@ -7,6 +7,9 @@ import type {
   RatingResult,
   WordEntry,
   AudienceQuestion,
+  AggregatedWord,
+  TopOptionInfo,
+  WordcloudUpdateData,
 } from "../../shared/types";
 
 interface EditorState {
@@ -31,13 +34,14 @@ interface LiveState {
   sessionId: string | null;
   audienceCount: number;
   pollResults: Record<string, PollResult>;
-  wordclouds: Record<string, WordEntry[]>;
+  pollTopOptions: Record<string, TopOptionInfo | null>;
+  wordclouds: Record<string, WordcloudUpdateData>;
   ratingResults: Record<string, RatingResult>;
   questions: AudienceQuestion[];
   shownQuestion: AudienceQuestion | null;
   setLive: (patch: Partial<LiveState>) => void;
-  addPollResult: (id: string, r: PollResult) => void;
-  addWordcloud: (id: string, w: WordEntry[]) => void;
+  addPollResult: (id: string, r: PollResult, topOption: TopOptionInfo | null) => void;
+  addWordcloud: (id: string, data: WordcloudUpdateData) => void;
   addRatingResult: (id: string, r: RatingResult) => void;
   addQuestion: (q: AudienceQuestion) => void;
   markQuestionShown: (id: string) => void;
@@ -145,6 +149,7 @@ const initialLive: Omit<LiveState, keyof { [K in keyof LiveState as LiveState[K]
   sessionId: null,
   audienceCount: 0,
   pollResults: {},
+  pollTopOptions: {},
   wordclouds: {},
   ratingResults: {},
   questions: [],
@@ -154,8 +159,12 @@ const initialLive: Omit<LiveState, keyof { [K in keyof LiveState as LiveState[K]
 export const useLiveStore = create<LiveState>((set) => ({
   ...initialLive,
   setLive: (patch) => set((s) => ({ ...s, ...patch })),
-  addPollResult: (id, r) => set((s) => ({ pollResults: { ...s.pollResults, [id]: r } })),
-  addWordcloud: (id, w) => set((s) => ({ wordclouds: { ...s.wordclouds, [id]: w } })),
+  addPollResult: (id, r, topOption) =>
+    set((s) => ({
+      pollResults: { ...s.pollResults, [id]: r },
+      pollTopOptions: { ...s.pollTopOptions, [id]: topOption },
+    })),
+  addWordcloud: (id, data) => set((s) => ({ wordclouds: { ...s.wordclouds, [id]: data } })),
   addRatingResult: (id, r) =>
     set((s) => ({ ratingResults: { ...s.ratingResults, [id]: r } })),
   addQuestion: (q) =>

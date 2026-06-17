@@ -9,6 +9,7 @@ import type {
   ReportData,
   ComponentReportSummary,
   ReportInsight,
+  ActionItem,
   Slide,
   InteractiveComponent,
   PollConfig,
@@ -315,7 +316,103 @@ export function buildReport(presentationId: string, sessionId: string): ReportDa
       return { componentId: c.id, type: c.type, prompt, results, summary };
     }),
   }));
-  return { presentation, session, totalAudience, insights: analyzeInsights(session, presentation, slidesReport), slidesReport };
+
+  const insights = analyzeInsights(session, presentation, slidesReport);
+
+  const actionItems: ActionItem[] = insights
+    .filter((i) => i.severity !== "success")
+    .map((ins, idx) => {
+      const defaultDue = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      return {
+        id: `act-${idx}`,
+        insightId: `${ins.componentId}-${ins.type}`,
+        title: ins.title,
+        description: ins.description,
+        severity: ins.severity,
+        componentId: ins.componentId,
+        slideIndex: ins.slideIndex,
+        slideTitle: ins.slideTitle,
+        prompt: ins.prompt,
+        assignee: "",
+        dueDate: defaultDue,
+        completed: false,
+        createdAt: new Date().toISOString(),
+      };
+    });
+
+  const bySlide = slidesReport.map((slide) => {
+    const components = slide.components;
+    const totalSubmissions = components.reduce((s, c) => s + c.summary.totalSubmissions, 0);
+    const uniqueParticipants = Math.max(...components.map((c) => c.summary.uniqueParticipants), 0);
+    const avgCompletionRate =
+      components.length > 0
+        ? Math.round(components.reduce((s, c) => s + c.summary.completionRate, 0) / components.length)
+        : 0;
+    const heatScore =
+      components.length > 0
+        ? Math.round(
+            (totalSubmissions * 0.4 + uniqueParticipants * 0.3 + avgCompletionRate * 0.3) *
+              (components.length / Math.max(components.length, 1)),
+          )
+        : 0;
+    return {
+      slideIndex: slide.slideIndex,
+      slideTitle: slide.slideTitle,
+      totalSubmissions,
+      uniqueParticipants,
+      avgCompletionRate,
+      components: components.length,
+      heatScore,
+    };
+  });
+
+  const typeMap = new Map<
+    string,
+    {
+      totalSubmissions: number;
+      totalParticipants: number;
+      totalCompletion: number;
+      count: number;
+    }
+  >();
+  for (const slide of slidesReport) {
+    for (const comp of slide.components) {
+      const existing = typeMap.get(comp.type) || {
+        totalSubmissions: 0,
+        totalParticipants: 0,
+        totalCompletion: 0,
+        count: 0,
+      };
+      existing.totalSubmissions += comp.summary.totalSubmissions;
+      existing.totalParticipants += comp.summary.uniqueParticipants;
+      existing.totalCompletion += comp.summary.completionRate;
+      existing.count += 1;
+      typeMap.set(comp.type, existing);
+    }
+  }
+  const byType = Array.from(typeMap.entries()).map(([type, data]) => {
+    const avgParticipants = data.count > 0 ? Math.round(data.totalParticipants / data.count) : 0;
+    const avgCompletionRate = data.count > 0 ? Math.round(data.totalCompletion / data.count) : 0;
+    const effectiveness = Math.round((avgCompletionRate * 0.5 + avgParticipants * 0.3 + (data.totalSubmissions / Math.max(data.count, 1)) * 0.2) / 10);
+    return {
+      type: type as "poll" | "wordcloud" | "rating" | "qna",
+      count: data.count,
+      totalSubmissions: data.totalSubmissions,
+      avgParticipants,
+      avgCompletionRate,
+      effectiveness,
+    };
+  });
+
+  return {
+    presentation,
+    session,
+    totalAudience,
+    insights,
+    actionItems,
+    comparison: { bySlide, byType },
+    slidesReport,
+  };
 }
 
 function buildComponentSummary(

@@ -161,6 +161,22 @@ export interface ReportInsight {
   metric: string;
 }
 
+export interface ActionItem {
+  id: string;
+  insightId?: string;
+  title: string;
+  description: string;
+  severity: InsightSeverity;
+  componentId: string;
+  slideIndex: number;
+  slideTitle: string;
+  prompt: string;
+  assignee: string;
+  dueDate: string;
+  completed: boolean;
+  createdAt: string;
+}
+
 export interface ComponentReportSummary {
   componentId: string;
   type: InteractiveType;
@@ -177,6 +193,26 @@ export interface ReportData {
   session: Session;
   totalAudience: number;
   insights: ReportInsight[];
+  actionItems: ActionItem[];
+  comparison: {
+    bySlide: {
+      slideIndex: number;
+      slideTitle: string;
+      totalSubmissions: number;
+      uniqueParticipants: number;
+      avgCompletionRate: number;
+      components: number;
+      heatScore: number;
+    }[];
+    byType: {
+      type: InteractiveType;
+      count: number;
+      totalSubmissions: number;
+      avgParticipants: number;
+      avgCompletionRate: number;
+      effectiveness: number;
+    }[];
+  };
   slidesReport: {
     slideIndex: number;
     slideTitle: string;
@@ -188,4 +224,24 @@ export interface ReportData {
       summary: ComponentReportSummary;
     }[];
   }[];
+}
+
+export interface TopOptionInfo {
+  index: number;
+  ratio: number;
+  option: string;
+}
+
+export interface PollUpdateData {
+  componentId: string;
+  results: PollResult;
+  topOption: TopOptionInfo | null;
+}
+
+export interface WordcloudUpdateData {
+  componentId: string;
+  words: AggregatedWord[];
+  uniqueParticipants: number;
+  recentCount: number;
+  rawCount: number;
 }

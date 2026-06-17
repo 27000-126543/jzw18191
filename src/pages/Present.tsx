@@ -30,7 +30,8 @@ import type {
   AudienceQuestion,
   PollResult,
   RatingResult,
-  WordEntry,
+  TopOptionInfo,
+  WordcloudUpdateData,
 } from "../../shared/types";
 import SlideCanvas from "../components/SlideCanvas";
 
@@ -55,6 +56,7 @@ export default function Present() {
   const sessionId = useLiveStore((s) => s.sessionId);
   const audienceCount = useLiveStore((s) => s.audienceCount);
   const pollResults = useLiveStore((s) => s.pollResults);
+  const pollTopOptions = useLiveStore((s) => s.pollTopOptions);
   const wordclouds = useLiveStore((s) => s.wordclouds);
   const ratingResults = useLiveStore((s) => s.ratingResults);
   const questions = useLiveStore((s) => s.questions);
@@ -108,11 +110,11 @@ export default function Present() {
       }
     });
     socket.on("audience:count", (data: any) => setLive({ audienceCount: data.count }));
-    socket.on("poll:update", (data: { componentId: string; results: PollResult }) =>
-      addPollResult(data.componentId, data.results),
+    socket.on("poll:update", (data: { componentId: string; results: PollResult; topOption: TopOptionInfo | null }) =>
+      addPollResult(data.componentId, data.results, data.topOption),
     );
-    socket.on("wordcloud:update", (data: { componentId: string; words: WordEntry[] }) =>
-      addWordcloud(data.componentId, data.words),
+    socket.on("wordcloud:update", (data: WordcloudUpdateData) =>
+      addWordcloud(data.componentId, data),
     );
     socket.on("rating:update", (data: { componentId: string; results: RatingResult }) =>
       addRatingResult(data.componentId, data.results),
@@ -425,6 +427,7 @@ export default function Present() {
                 currentSlide={currentSlide}
                 audienceCount={audienceCount}
                 pollResults={pollResults}
+                pollTopOptions={pollTopOptions}
                 wordclouds={wordclouds}
                 ratingResults={ratingResults}
                 questions={currentQuestions}
@@ -611,6 +614,7 @@ function ConsolePanel({
   currentSlide,
   audienceCount,
   pollResults,
+  pollTopOptions,
   wordclouds,
   ratingResults,
   questions,
@@ -619,7 +623,8 @@ function ConsolePanel({
   currentSlide: any;
   audienceCount: number;
   pollResults: Record<string, any>;
-  wordclouds: Record<string, any[]>;
+  pollTopOptions: Record<string, TopOptionInfo | null>;
+  wordclouds: Record<string, WordcloudUpdateData>;
   ratingResults: Record<string, any>;
   questions: any[];
   paused: boolean;
@@ -640,6 +645,8 @@ function ConsolePanel({
     let hasLowConsensus = false;
     let highConsensusPrompt = "";
     let lowConsensusPrompt = "";
+    let highConsensusOption = "";
+    let highConsensusRatio = 0;
     let maxParticipationRate = 0;
 
     for (const comp of components) {
@@ -649,20 +656,22 @@ function ConsolePanel({
       if (comp.type === "poll") {
         const r = pollResults[comp.id];
         currentCount = r?.totalResponses ?? 0;
-        if (r?.optionCounts && r.totalResponses > 0) {
-          const maxCount = Math.max(...Object.values(r.optionCounts) as number[]);
-          const ratio = maxCount / r.totalResponses;
-          const cfg = comp.config as any;
-          if (ratio >= 0.6) {
+        const topOpt = pollTopOptions[comp.id];
+        if (topOpt && r?.totalResponses > 0) {
+          if (topOpt.ratio >= 60) {
             hasHighConsensus = true;
+            const cfg = comp.config as any;
             highConsensusPrompt = cfg.prompt || comp.prompt;
-          } else if (ratio < 0.4 && r.totalResponses >= 5) {
+            highConsensusOption = topOpt.option;
+            highConsensusRatio = topOpt.ratio;
+          } else if (topOpt.ratio < 40 && r.totalResponses >= 5) {
             hasLowConsensus = true;
+            const cfg = comp.config as any;
             lowConsensusPrompt = cfg.prompt || comp.prompt;
           }
         }
       } else if (comp.type === "wordcloud") {
-        currentCount = wordclouds[comp.id]?.length ?? 0;
+        currentCount = wordclouds[comp.id]?.uniqueParticipants ?? 0;
       } else if (comp.type === "rating") {
         const r = ratingResults[comp.id];
         currentCount = r?.totalResponses ?? 0;
@@ -678,8 +687,8 @@ function ConsolePanel({
       worstCompletionRate = Math.min(worstCompletionRate, rate);
     }
 
-    return { totalGap, totalCurrent, worstCompletionRate, hasHighConsensus, hasLowConsensus, highConsensusPrompt, lowConsensusPrompt, maxParticipationRate };
-  }, [components, audienceCount, pollResults, wordclouds, ratingResults, currentQuestions]);
+    return { totalGap, totalCurrent, worstCompletionRate, hasHighConsensus, hasLowConsensus, highConsensusPrompt, lowConsensusPrompt, highConsensusOption, highConsensusRatio, maxParticipationRate };
+  }, [components, audienceCount, pollResults, pollTopOptions, wordclouds, ratingResults, currentQuestions]);
 
   const suggestion = useMemo(() => {
     if (components.length === 0) return { status: "go", text: "建议翻页", detail: "当前页无互动组件" };
@@ -706,7 +715,7 @@ function ConsolePanel({
         <p className={`text-xs ${suggestionStyle.text} opacity-80`}>{suggestion.detail}</p>
         {analysis.hasHighConsensus && (
           <p className="text-[10px] text-emerald-300 mt-1.5 flex items-center gap-1">
-            <CheckCircle className="w-3 h-3" /> 「{analysis.highConsensusPrompt}」意见高度集中
+            <CheckCircle className="w-3 h-3" /> 「{analysis.highConsensusPrompt}」意见高度集中，「{analysis.highConsensusOption}」占 {analysis.highConsensusRatio}%
           </p>
         )}
         {analysis.hasLowConsensus && (
@@ -744,6 +753,7 @@ function ConsolePanel({
                 comp={comp}
                 audienceCount={audienceCount}
                 pollResults={pollResults}
+                pollTopOptions={pollTopOptions}
                 wordclouds={wordclouds}
                 ratingResults={ratingResults}
                 questions={questions}
@@ -789,6 +799,7 @@ function ConsolePanel({
         <RecentSubmissions
           components={components}
           pollResults={pollResults}
+          pollTopOptions={pollTopOptions}
           wordclouds={wordclouds}
           ratingResults={ratingResults}
           questions={questions}
@@ -810,6 +821,7 @@ function ComponentProgressBar({
   comp,
   audienceCount,
   pollResults,
+  pollTopOptions,
   wordclouds,
   ratingResults,
   questions,
@@ -817,18 +829,28 @@ function ComponentProgressBar({
   comp: any;
   audienceCount: number;
   pollResults: Record<string, any>;
-  wordclouds: Record<string, any[]>;
+  pollTopOptions: Record<string, TopOptionInfo | null>;
+  wordclouds: Record<string, WordcloudUpdateData>;
   ratingResults: Record<string, any>;
   questions: any[];
 }) {
   const typeLabel: Record<string, string> = { poll: "投票", wordcloud: "词云", rating: "评分", qna: "问答" };
   let participated = 0;
   let total = audienceCount;
+  let recentCount = 0;
+  let extraInfo = "";
 
   if (comp.type === "poll" && pollResults[comp.id]) {
     participated = pollResults[comp.id].totalResponses;
+    const topOpt = pollTopOptions[comp.id];
+    if (topOpt) {
+      extraInfo = `「${topOpt.option}」${topOpt.ratio}%`;
+    }
   } else if (comp.type === "wordcloud" && wordclouds[comp.id]) {
-    participated = wordclouds[comp.id].reduce((s: number, w: any) => s + w.count, 0);
+    const wc = wordclouds[comp.id];
+    participated = wc.uniqueParticipants;
+    recentCount = wc.recentCount;
+    extraInfo = `${wc.rawCount} 条提交 / ${wc.uniqueParticipants} 人`;
   } else if (comp.type === "rating" && ratingResults[comp.id]) {
     participated = ratingResults[comp.id].totalResponses;
   } else if (comp.type === "qna") {
@@ -855,7 +877,15 @@ function ComponentProgressBar({
           style={{ width: `${Math.max(pct, 2)}%` }}
         />
       </div>
-      <div className="text-right text-[10px] text-white/30 mt-0.5">{pct}%</div>
+      <div className="flex items-center justify-between mt-0.5">
+        <span className="text-[10px] text-white/30">{pct}%</span>
+        {extraInfo && (
+          <span className="text-[10px] text-white/30">{extraInfo}</span>
+        )}
+        {recentCount > 0 && (
+          <span className="text-[10px] text-emerald-400">30秒 +{recentCount}</span>
+        )}
+      </div>
     </div>
   );
 }
@@ -863,36 +893,58 @@ function ComponentProgressBar({
 function RecentSubmissions({
   components,
   pollResults,
+  pollTopOptions,
   wordclouds,
   ratingResults,
   questions,
 }: {
   components: any[];
   pollResults: Record<string, any>;
-  wordclouds: Record<string, any[]>;
+  pollTopOptions: Record<string, TopOptionInfo | null>;
+  wordclouds: Record<string, WordcloudUpdateData>;
   ratingResults: Record<string, any>;
   questions: any[];
 }) {
-  const items: { time: string; text: string }[] = [];
+  const items: { time: string; text: string; isRecent?: boolean }[] = [];
 
   for (const comp of components) {
     if (comp.type === "poll" && pollResults[comp.id]) {
+      const r = pollResults[comp.id];
+      const topOpt = pollTopOptions[comp.id];
+      let text = `投票: ${r.totalResponses} 人已参与`;
+      if (topOpt) {
+        text += `，「${topOpt.option}」领先 ${topOpt.ratio}%`;
+      }
       items.push({
-        time: "实时",
-        text: `投票: ${pollResults[comp.id].totalResponses} 人已参与`,
+        time: "整场",
+        text,
       });
     }
     if (comp.type === "wordcloud" && wordclouds[comp.id]) {
-      const words = wordclouds[comp.id];
+      const wc = wordclouds[comp.id];
+      const words = wc.words;
+      const totalCount = words.reduce((s, w) => s + w.count, 0);
+      items.push({
+        time: "整场",
+        text: `词云: ${wc.uniqueParticipants} 人，${totalCount} 条提交`,
+      });
+      if (wc.recentCount > 0) {
+        items.push({
+          time: "30秒",
+          text: `词云: 新增 ${wc.recentCount} 条`,
+          isRecent: true,
+        });
+      }
       const latest = words.slice(-3);
       for (const w of latest) {
-        items.push({ time: "新", text: `词云: "${w.word}"` });
+        items.push({ time: "新", text: `词云: "${w.word}" x${w.count}` });
       }
     }
     if (comp.type === "rating" && ratingResults[comp.id]) {
+      const r = ratingResults[comp.id];
       items.push({
-        time: "实时",
-        text: `评分: 平均 ${ratingResults[comp.id].average} 分 (${ratingResults[comp.id].totalResponses} 人)`,
+        time: "整场",
+        text: `评分: 平均 ${r.average} 分 (${r.totalResponses} 人)`,
       });
     }
     if (comp.type === "qna") {
@@ -913,10 +965,10 @@ function RecentSubmissions({
 
   return (
     <div className="space-y-1.5">
-      {items.slice(0, 6).map((item, i) => (
+      {items.slice(0, 8).map((item, i) => (
         <div key={i} className="flex items-start gap-2 text-[11px]">
-          <span className="text-white/30 shrink-0">{item.time}</span>
-          <span className="text-white/60">{item.text}</span>
+          <span className={`shrink-0 ${item.isRecent ? "text-emerald-400 font-bold" : "text-white/30"}`}>{item.time}</span>
+          <span className={item.isRecent ? "text-emerald-300" : "text-white/60"}>{item.text}</span>
         </div>
       ))}
     </div>
