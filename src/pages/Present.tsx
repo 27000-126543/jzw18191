@@ -16,6 +16,10 @@ import {
   LogOut,
   LayoutDashboard,
   Activity,
+  Clock,
+  AlertTriangle,
+  AlertCircle,
+  Info,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { api } from "../api/client";
@@ -621,11 +625,102 @@ function ConsolePanel({
   paused: boolean;
 }) {
   const components = currentSlide?.components ?? [];
-  const unansweredCount = questions.filter((q) => !q.isAnswered).length;
-  const recentQuestions = [...questions].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 3);
+  const currentComponentIds = new Set(components.map((c: any) => c.id));
+  const currentQuestions = questions.filter((q) => currentComponentIds.has(q.componentId));
+  const unansweredCount = currentQuestions.filter((q) => !q.isAnswered).length;
+  const recentQuestions = [...currentQuestions].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 3);
+
+  const TARGET_PARTICIPATION_RATE = 0.8;
+
+  const analysis = useMemo(() => {
+    let totalGap = 0;
+    let totalCurrent = 0;
+    let worstCompletionRate = 1;
+    let hasHighConsensus = false;
+    let hasLowConsensus = false;
+    let highConsensusPrompt = "";
+    let lowConsensusPrompt = "";
+    let maxParticipationRate = 0;
+
+    for (const comp of components) {
+      const targetCount = Math.ceil(audienceCount * TARGET_PARTICIPATION_RATE);
+      let currentCount = 0;
+
+      if (comp.type === "poll") {
+        const r = pollResults[comp.id];
+        currentCount = r?.totalResponses ?? 0;
+        if (r?.optionCounts && r.totalResponses > 0) {
+          const maxCount = Math.max(...Object.values(r.optionCounts) as number[]);
+          const ratio = maxCount / r.totalResponses;
+          const cfg = comp.config as any;
+          if (ratio >= 0.6) {
+            hasHighConsensus = true;
+            highConsensusPrompt = cfg.prompt || comp.prompt;
+          } else if (ratio < 0.4 && r.totalResponses >= 5) {
+            hasLowConsensus = true;
+            lowConsensusPrompt = cfg.prompt || comp.prompt;
+          }
+        }
+      } else if (comp.type === "wordcloud") {
+        currentCount = wordclouds[comp.id]?.length ?? 0;
+      } else if (comp.type === "rating") {
+        const r = ratingResults[comp.id];
+        currentCount = r?.totalResponses ?? 0;
+      } else if (comp.type === "qna") {
+        const qs = currentQuestions.filter((q) => q.componentId === comp.id);
+        currentCount = qs.length;
+      }
+
+      totalCurrent += currentCount;
+      totalGap += Math.max(0, targetCount - currentCount);
+      const rate = audienceCount > 0 ? currentCount / audienceCount : 0;
+      maxParticipationRate = Math.max(maxParticipationRate, rate);
+      worstCompletionRate = Math.min(worstCompletionRate, rate);
+    }
+
+    return { totalGap, totalCurrent, worstCompletionRate, hasHighConsensus, hasLowConsensus, highConsensusPrompt, lowConsensusPrompt, maxParticipationRate };
+  }, [components, audienceCount, pollResults, wordclouds, ratingResults, currentQuestions]);
+
+  const suggestion = useMemo(() => {
+    if (components.length === 0) return { status: "go", text: "建议翻页", detail: "当前页无互动组件" };
+    if (paused) return { status: "warn", text: "已暂停", detail: "请先恢复再翻页" };
+    if (unansweredCount >= 3) return { status: "stop", text: "建议等待", detail: `还有 ${unansweredCount} 条提问未处理` };
+    if (analysis.totalGap > 0) return { status: "warn", text: "可继续等待", detail: `还差 ${analysis.totalGap} 人参与达到目标` };
+    if (analysis.maxParticipationRate < 0.5 && audienceCount >= 5) return { status: "warn", text: "可继续等待", detail: "参与率不足50%" };
+    return { status: "go", text: "建议翻页", detail: "数据已稳定，可进入下一页" };
+  }, [components, paused, unansweredCount, analysis, audienceCount]);
+
+  const suggestionStyle = {
+    go: { bg: "bg-emerald-500/20", border: "border-emerald-400/30", text: "text-emerald-300", icon: <ChevronRight className="w-4 h-4" /> },
+    warn: { bg: "bg-amber-500/20", border: "border-amber-400/30", text: "text-amber-300", icon: <Clock className="w-4 h-4" /> },
+    stop: { bg: "bg-red-500/20", border: "border-red-400/30", text: "text-red-300", icon: <AlertCircle className="w-4 h-4" /> },
+  }[suggestion.status] || { bg: "bg-slate-500/20", border: "border-slate-400/30", text: "text-slate-300", icon: <Info className="w-4 h-4" /> };
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3 space-y-3">
+      <div className={`p-3 rounded-xl ${suggestionStyle.bg} border ${suggestionStyle.border}`}>
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-lg">{suggestionStyle.icon}</span>
+          <span className={`text-sm font-bold ${suggestionStyle.text}`}>翻页建议：{suggestion.text}</span>
+        </div>
+        <p className={`text-xs ${suggestionStyle.text} opacity-80`}>{suggestion.detail}</p>
+        {analysis.hasHighConsensus && (
+          <p className="text-[10px] text-emerald-300 mt-1.5 flex items-center gap-1">
+            <CheckCircle className="w-3 h-3" /> 「{analysis.highConsensusPrompt}」意见高度集中
+          </p>
+        )}
+        {analysis.hasLowConsensus && (
+          <p className="text-[10px] text-amber-300 mt-1 flex items-center gap-1">
+            <AlertTriangle className="w-3 h-3" /> 「{analysis.lowConsensusPrompt}」存在明显分歧
+          </p>
+        )}
+        {analysis.totalGap > 0 && audienceCount > 0 && (
+          <p className="text-[10px] text-white/50 mt-1">
+            目标参与率 80%（{Math.ceil(audienceCount * TARGET_PARTICIPATION_RATE)} 人/项），当前缺口 {analysis.totalGap} 人
+          </p>
+        )}
+      </div>
+
       <div className="p-3 rounded-xl bg-white/5 border border-white/10">
         <div className="flex items-center gap-2 mb-2">
           <Activity className="w-4 h-4 text-accent-400" />
@@ -637,7 +732,7 @@ function ConsolePanel({
           )}
         </div>
         <div className="text-xs text-white/40 mb-2">
-          在线 <span className="font-bold text-white/70">{audienceCount}</span> 人
+          在线 <span className="font-bold text-white/70">{audienceCount}</span> 人 · 目标参与率 <span className="font-bold text-white/70">80%</span>
         </div>
         {components.length === 0 ? (
           <p className="text-xs text-white/30 text-center py-3">当前页无互动组件</p>

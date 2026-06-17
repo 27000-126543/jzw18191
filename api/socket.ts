@@ -16,6 +16,7 @@ import type {
   RatingResponse,
   AudienceQuestion,
   PollConfig,
+  WordEntry,
 } from "../shared/types.js";
 
 let io: IOServer | null = null;
@@ -30,6 +31,14 @@ function getPresentationBySession(session: Session) {
   return presentations.get(session.presentationId);
 }
 
+function aggregateWordcloud(entries: WordEntry[]): { word: string; count: number }[] {
+  const map = new Map<string, number>();
+  for (const e of entries) {
+    map.set(e.word, (map.get(e.word) ?? 0) + e.count);
+  }
+  return Array.from(map, ([word, count]) => ({ word, count }));
+}
+
 export function setupSocket(server: HTTPServer): void {
   io = new IOServer(server, {
     cors: { origin: "*", methods: ["GET", "POST"] },
@@ -42,6 +51,7 @@ export function setupSocket(server: HTTPServer): void {
         socket.emit("error", { message: "无进行中的演示，请先开始演示" });
         return;
       }
+      const presentation = getPresentationBySession(session);
       socket.join(`pres:${session.id}`);
       socket.data.sessionId = session.id;
       socket.data.role = "presenter";
@@ -51,6 +61,12 @@ export function setupSocket(server: HTTPServer): void {
         currentSlide: session.currentSlide,
         paused: session.paused,
       });
+      if (presentation) {
+        const currentSlide = presentation.slides[session.currentSlide];
+        if (currentSlide) {
+          broadcastCurrentResults(session, currentSlide.components);
+        }
+      }
     });
 
     socket.on(
@@ -217,13 +233,19 @@ export function setupSocket(server: HTTPServer): void {
         if (!session) return;
         const clean = word.trim().slice(0, 20);
         if (!clean) return;
+        const audienceId = socket.data.audienceId as string;
         const list = session.words[componentId] ?? (session.words[componentId] = []);
-        const existing = list.find((w) => w.word === clean);
-        if (existing) existing.count++;
-        else list.push({ word: clean, count: 1, componentId });
+        list.push({
+          word: clean,
+          count: 1,
+          componentId,
+          audienceId,
+          timestamp: new Date().toISOString(),
+        });
+        const agg = aggregateWordcloud(list);
         persistSessions();
-        io?.to(`aud:${session.id}`).emit("wordcloud:update", { componentId, words: list });
-        io?.to(`pres:${session.id}`).emit("wordcloud:update", { componentId, words: list });
+        io?.to(`aud:${session.id}`).emit("wordcloud:update", { componentId, words: agg });
+        io?.to(`pres:${session.id}`).emit("wordcloud:update", { componentId, words: agg });
       },
     );
 
@@ -308,8 +330,9 @@ function broadcastCurrentResults(session: Session, components: InteractiveCompon
       io?.to(`pres:${session.id}`).emit("poll:update", { componentId: comp.id, results: r });
     } else if (comp.type === "wordcloud") {
       const w = session.words[comp.id] ?? [];
-      io?.to(`aud:${session.id}`).emit("wordcloud:update", { componentId: comp.id, words: w });
-      io?.to(`pres:${session.id}`).emit("wordcloud:update", { componentId: comp.id, words: w });
+      const agg = aggregateWordcloud(w);
+      io?.to(`aud:${session.id}`).emit("wordcloud:update", { componentId: comp.id, words: agg });
+      io?.to(`pres:${session.id}`).emit("wordcloud:update", { componentId: comp.id, words: agg });
     } else if (comp.type === "rating") {
       const r = calculateRatingResult(session, comp);
       io?.to(`aud:${session.id}`).emit("rating:update", { componentId: comp.id, results: r });

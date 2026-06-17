@@ -101,17 +101,25 @@ router.get("/:id/report/:sessionId", (req: Request, res: Response) => {
 router.get("/:id/export/:sessionId/csv", (req: Request, res: Response) => {
   const report = buildReport(req.params.id, req.params.sessionId);
   if (!report) return res.status(404).json({ success: false, error: "报告数据不存在" });
+
+  const componentIdsParam = (req.query.componentIds as string)?.trim();
+  const allowedIds = componentIdsParam ? new Set(componentIdsParam.split(",").map((s) => s.trim()).filter(Boolean)) : null;
+
   const lines: string[] = [];
   lines.push("=== 会话总览 ===");
   lines.push(`演示标题,${report.presentation.title}`);
   lines.push(`总参与人数,${report.totalAudience}`);
   lines.push(`开始时间,${report.session.startedAt}`);
   lines.push(`结束时间,${report.session.endedAt ?? "进行中"}`);
+  if (allowedIds) {
+    lines.push(`导出范围,${allowedIds.size} 个选中组件`);
+  }
   lines.push("");
   lines.push("=== 各组件总览 ===");
   lines.push("页面,组件类型,题目,提交量,参与人数,完成率(%),首次提交,最后提交");
   for (const slide of report.slidesReport) {
     for (const comp of slide.components) {
+      if (allowedIds && !allowedIds.has(comp.componentId)) continue;
       const s = comp.summary;
       const typeLabel: Record<string, string> = { poll: "投票", wordcloud: "词云", rating: "评分", qna: "问答" };
       lines.push(
@@ -123,6 +131,7 @@ router.get("/:id/export/:sessionId/csv", (req: Request, res: Response) => {
 
   for (const slide of report.slidesReport) {
     for (const comp of slide.components) {
+      if (allowedIds && !allowedIds.has(comp.componentId)) continue;
       const typeLabel: Record<string, string> = { poll: "投票", wordcloud: "词云", rating: "评分", qna: "问答" };
       lines.push(`=== 第${slide.slideIndex + 1}页 ${slide.slideTitle} - ${typeLabel[comp.type]}: ${comp.prompt} ===`);
       if (comp.type === "poll") {

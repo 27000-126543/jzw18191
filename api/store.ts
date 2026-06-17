@@ -8,6 +8,7 @@ import type {
   RatingResult,
   ReportData,
   ComponentReportSummary,
+  ReportInsight,
   Slide,
   InteractiveComponent,
   PollConfig,
@@ -16,8 +17,17 @@ import type {
   QnaConfig,
   AudienceQuestion,
   WordEntry,
+  AggregatedWord,
 } from "../shared/types.js";
 import { sanitizeRatingConfig } from "../shared/types.js";
+
+function aggregateWordcloud(entries: WordEntry[]): AggregatedWord[] {
+  const map = new Map<string, number>();
+  for (const e of entries) {
+    map.set(e.word, (map.get(e.word) ?? 0) + e.count);
+  }
+  return Array.from(map, ([word, count]) => ({ word, count }));
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -295,23 +305,23 @@ export function buildReport(presentationId: string, sessionId: string): ReportDa
       else if (c.type === "wordcloud") prompt = (cfg as WordcloudConfig).prompt;
       else if (c.type === "rating") prompt = (cfg as RatingConfig).title;
       else prompt = (cfg as QnaConfig).prompt;
-      let results: PollResult | (typeof session.words)[string] | RatingResult | { questions: AudienceQuestion[] } =
+      let results: PollResult | WordEntry[] | AggregatedWord[] | RatingResult | { questions: AudienceQuestion[] } =
         [];
       if (c.type === "poll") results = calculatePollResult(session, c);
-      else if (c.type === "wordcloud") results = session.words[c.id] || [];
+      else if (c.type === "wordcloud") results = aggregateWordcloud(session.words[c.id] || []);
       else if (c.type === "rating") results = calculateRatingResult(session, c);
       else results = { questions: session.questions.filter((q) => q.componentId === c.id) };
       const summary = buildComponentSummary(session, c, results, totalAudience);
       return { componentId: c.id, type: c.type, prompt, results, summary };
     }),
   }));
-  return { presentation, session, totalAudience, slidesReport };
+  return { presentation, session, totalAudience, insights: analyzeInsights(session, presentation, slidesReport), slidesReport };
 }
 
 function buildComponentSummary(
   session: Session,
   component: InteractiveComponent,
-  results: PollResult | WordEntry[] | RatingResult | { questions: AudienceQuestion[] },
+  results: PollResult | WordEntry[] | AggregatedWord[] | RatingResult | { questions: AudienceQuestion[] },
   totalAudience: number,
 ): ComponentReportSummary {
   let totalSubmissions = 0;
@@ -326,9 +336,14 @@ function buildComponentSummary(
       .filter((x) => x.componentId === component.id)
       .forEach((x) => { if (x.timestamp) timestamps.push(x.timestamp); });
   } else if (component.type === "wordcloud") {
-    const w = results as WordEntry[];
-    totalSubmissions = w.reduce((s, x) => s + x.count, 0);
-    uniqueParticipants = Math.min(totalSubmissions, totalAudience);
+    const raw = session.words[component.id] ?? [];
+    totalSubmissions = raw.length;
+    const uniqueAudiences = new Set<string>();
+    for (const e of raw) {
+      if (e.audienceId) uniqueAudiences.add(e.audienceId);
+      if (e.timestamp) timestamps.push(e.timestamp);
+    }
+    uniqueParticipants = uniqueAudiences.size;
   } else if (component.type === "rating") {
     const r = results as RatingResult;
     totalSubmissions = r.totalResponses;
@@ -355,4 +370,113 @@ function buildComponentSummary(
     firstSubmissionAt: timestamps[0] || null,
     lastSubmissionAt: timestamps[timestamps.length - 1] || null,
   };
+}
+
+function analyzeInsights(
+  session: Session,
+  presentation: Presentation,
+  slidesReport: ReportData["slidesReport"],
+): ReportInsight[] {
+  const insights: ReportInsight[] = [];
+
+  for (const slideReport of slidesReport) {
+    for (const comp of slideReport.components) {
+      const s = comp.summary;
+      const slide = presentation.slides[slideReport.slideIndex];
+      const component = slide?.components.find((c) => c.id === comp.componentId);
+      if (!component) continue;
+
+      if (s.uniqueParticipants > 0 && s.completionRate < 40) {
+        insights.push({
+          type: "low_participation",
+          severity: "warning",
+          componentId: comp.componentId,
+          slideIndex: slideReport.slideIndex,
+          slideTitle: slideReport.slideTitle,
+          prompt: s.prompt,
+          title: "参与率偏低",
+          description: `完成率仅 ${s.completionRate}%，低于 40% 的建议阈值。可能是互动引导不足或页面停留时间太短。`,
+          metric: `完成率 ${s.completionRate}%（${s.uniqueParticipants}/${session.audienceIds.length} 人参与）`,
+        });
+      }
+
+      if (comp.type === "poll" && s.uniqueParticipants >= 3) {
+        const r = comp.results as PollResult;
+        const sortedPct = [...r.optionPercentages].sort((a, b) => b - a);
+        const topPct = sortedPct[0] ?? 0;
+        const gap = (sortedPct[0] ?? 0) - (sortedPct[1] ?? 0);
+        if (topPct < 40) {
+          insights.push({
+            type: "high_divergence",
+            severity: "info",
+            componentId: comp.componentId,
+            slideIndex: slideReport.slideIndex,
+            slideTitle: slideReport.slideTitle,
+            prompt: s.prompt,
+            title: "观点高度分歧",
+            description: `最高票选项仅 ${topPct}%，没有形成共识，适合作为讨论切入点。`,
+            metric: `最高票 ${topPct}%，选项分布离散`,
+          });
+        } else if (topPct >= 70 && gap >= 50) {
+          insights.push({
+            type: "high_consensus",
+            severity: "success",
+            componentId: comp.componentId,
+            slideIndex: slideReport.slideIndex,
+            slideTitle: slideReport.slideTitle,
+            prompt: s.prompt,
+            title: "达成高度共识",
+            description: `领先选项 ${topPct}%，领先第二名 ${gap} 个百分点，观众意见高度一致。`,
+            metric: `共识度 ${topPct}%，优势 ${gap}%`,
+          });
+        }
+      }
+
+      if (comp.type === "rating" && s.uniqueParticipants >= 3) {
+        const r = comp.results as RatingResult;
+        const sumSq = r.distribution.reduce((acc, d) => acc + d.count * Math.pow(d.rating - r.average, 2), 0);
+        const stdDev = Math.sqrt(sumSq / Math.max(1, r.totalResponses));
+        const cfg = component.config as RatingConfig;
+        const range = cfg.max - cfg.min;
+        const volatility = range > 0 ? stdDev / range : 0;
+        if (volatility > 0.3) {
+          insights.push({
+            type: "high_volatility",
+            severity: "warning",
+            componentId: comp.componentId,
+            slideIndex: slideReport.slideIndex,
+            slideTitle: slideReport.slideTitle,
+            prompt: s.prompt,
+            title: "评分波动明显",
+            description: `评分标准差较大（${stdDev.toFixed(2)}），观众评价存在明显分化，值得关注两极意见。`,
+            metric: `标准差 ${stdDev.toFixed(2)}，平均分 ${r.average}`,
+          });
+        }
+      }
+
+      if (comp.type === "qna") {
+        const q = comp.results as { questions: AudienceQuestion[] };
+        const unanswered = q.questions.filter((x) => !x.isAnswered).length;
+        const answerRate = q.questions.length > 0 ? 100 - Math.round((unanswered / q.questions.length) * 100) : 100;
+        if (q.questions.length >= 3 && answerRate < 50) {
+          insights.push({
+            type: "qa_backlog",
+            severity: "danger",
+            componentId: comp.componentId,
+            slideIndex: slideReport.slideIndex,
+            slideTitle: slideReport.slideTitle,
+            prompt: s.prompt,
+            title: "问答堆积严重",
+            description: `共 ${q.questions.length} 个问题，仅回答 ${answerRate}%，建议会后跟进未回答问题。`,
+            metric: `未回答 ${unanswered} 条，回答率 ${answerRate}%`,
+          });
+        }
+      }
+    }
+  }
+
+  return insights.sort((a, b) => {
+    const sevOrder: Record<string, number> = { danger: 0, warning: 1, info: 2, success: 3 };
+    return sevOrder[a.severity] - sevOrder[b.severity];
+  });
 }

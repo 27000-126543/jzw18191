@@ -62,9 +62,14 @@ export const api = {
       method: "GET",
     }),
 
-  exportCsv: (presentationId: string, sessionId: string) => {
+  exportCsv: (presentationId: string, sessionId: string, componentIds?: string[]) => {
+    const params = new URLSearchParams();
+    if (componentIds && componentIds.length > 0) {
+      params.set("componentIds", componentIds.join(","));
+    }
+    const qs = params.toString();
     const a = document.createElement("a");
-    a.href = `${API_BASE}/presentations/${presentationId}/export/${sessionId}/csv`;
+    a.href = `${API_BASE}/presentations/${presentationId}/export/${sessionId}/csv${qs ? `?${qs}` : ""}`;
     a.download = `report-${Date.now()}.csv`;
     document.body.appendChild(a);
     a.click();

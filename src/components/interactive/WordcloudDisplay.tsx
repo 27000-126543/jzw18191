@@ -1,9 +1,9 @@
 import { useMemo } from "react";
-import type { WordcloudConfig, WordEntry } from "../../../shared/types";
+import type { WordcloudConfig, WordEntry, AggregatedWord } from "../../../shared/types";
 
 interface Props {
   config: WordcloudConfig;
-  words?: WordEntry[];
+  words?: (WordEntry | AggregatedWord)[];
   dark?: boolean;
 }
 

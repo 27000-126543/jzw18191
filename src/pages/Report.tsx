@@ -15,6 +15,14 @@ import {
   ChevronRight,
   Clock,
   TrendingUp,
+  AlertTriangle,
+  CheckCircle,
+  Info,
+  AlertCircle,
+  Copy,
+  Check,
+  Filter,
+  Square,
 } from "lucide-react";
 import { api } from "../api/client";
 import type {
@@ -25,6 +33,8 @@ import type {
   AudienceQuestion,
   InteractiveComponent,
   ComponentReportSummary,
+  ReportInsight,
+  AggregatedWord,
   PollConfig,
   WordcloudConfig,
   RatingConfig,
@@ -43,7 +53,7 @@ interface FlattenedReportComponent {
   type: "poll" | "wordcloud" | "rating" | "qna";
   prompt: string;
   config: PollConfig | WordcloudConfig | RatingConfig | QnaConfig;
-  results: PollResult | WordEntry[] | RatingResult | { questions: AudienceQuestion[] };
+  results: PollResult | WordEntry[] | AggregatedWord[] | RatingResult | { questions: AudienceQuestion[] };
   summary: ComponentReportSummary;
 }
 
@@ -61,6 +71,62 @@ const TYPE_CHIP: Record<string, string> = {
   qna: "bg-purple-100 text-purple-700",
 };
 
+function formatTime(iso: string): string {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+}
+
+function InsightCard({ insight }: { insight: ReportInsight }) {
+  const severityStyles: Record<string, { bg: string; border: string; text: string; icon: React.ReactNode }> = {
+    danger: {
+      bg: "bg-red-50",
+      border: "border-red-200",
+      text: "text-red-700",
+      icon: <AlertCircle className="w-5 h-5 text-red-500" />,
+    },
+    warning: {
+      bg: "bg-amber-50",
+      border: "border-amber-200",
+      text: "text-amber-700",
+      icon: <AlertTriangle className="w-5 h-5 text-amber-500" />,
+    },
+    info: {
+      bg: "bg-sky-50",
+      border: "border-sky-200",
+      text: "text-sky-700",
+      icon: <Info className="w-5 h-5 text-sky-500" />,
+    },
+    success: {
+      bg: "bg-emerald-50",
+      border: "border-emerald-200",
+      text: "text-emerald-700",
+      icon: <CheckCircle className="w-5 h-5 text-emerald-500" />,
+    },
+  };
+  const s = severityStyles[insight.severity] || severityStyles.info;
+  return (
+    <div className={`${s.bg} ${s.border} border rounded-2xl p-4`}>
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5">{s.icon}</div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${s.bg} ${s.text} border ${s.border}`}>
+              {insight.severity === "danger" ? "需关注" : insight.severity === "warning" ? "建议改进" : insight.severity === "success" ? "亮点" : "观察"}
+            </span>
+            <span className="text-xs text-slate-500">第{insight.slideIndex + 1}页 · {insight.slideTitle}</span>
+          </div>
+          <h4 className={`font-semibold ${s.text} mb-1`}>{insight.title}</h4>
+          <p className="text-sm text-slate-600 mb-1">{insight.description}</p>
+          <p className="text-xs text-slate-500">{insight.metric}</p>
+          <p className="text-xs text-slate-400 mt-1 italic">"{insight.prompt}"</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Report() {
   const { presentationId, sessionId } = useParams<{ presentationId: string; sessionId: string }>();
   const navigate = useNavigate();
@@ -68,6 +134,10 @@ export default function Report() {
   const [error, setError] = useState("");
   const [report, setReport] = useState<ReportData | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [filterType, setFilterType] = useState<string>("all");
+  const [filterSlide, setFilterSlide] = useState<number | string>("all");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [copiedSummary, setCopiedSummary] = useState(false);
 
   useEffect(() => {
     if (!presentationId || !sessionId) return;
@@ -79,6 +149,7 @@ export default function Report() {
     try {
       const data = await api.getReport(presentationId!, sessionId!);
       setReport(data);
+      setSelectedIds(new Set(data.slidesReport.flatMap((s) => s.components.map((c) => c.componentId))));
     } catch (e) {
       setError((e as Error).message || "报告加载失败");
     }
@@ -87,7 +158,7 @@ export default function Report() {
 
   function exportCsv() {
     if (!presentationId || !sessionId) return;
-    api.exportCsv(presentationId, sessionId);
+    api.exportCsv(presentationId, sessionId, Array.from(selectedIds));
   }
 
   function toggleExpand(cid: string) {
@@ -99,8 +170,27 @@ export default function Report() {
     });
   }
 
-  const { flattenedComponents, stats } = useMemo(() => {
-    if (!report) return { flattenedComponents: [], stats: null };
+  function toggleSelected(cid: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(cid)) next.delete(cid);
+      else next.add(cid);
+      return next;
+    });
+  }
+
+  async function copySummary() {
+    try {
+      await navigator.clipboard.writeText(copyText);
+      setCopiedSummary(true);
+      setTimeout(() => setCopiedSummary(false), 2000);
+    } catch {
+      alert("复制失败，请手动复制");
+    }
+  }
+
+  const { flattenedComponents, filteredComponents, stats, copyText } = useMemo(() => {
+    if (!report) return { flattenedComponents: [], filteredComponents: [], stats: null, copyText: "" };
 
     const findConfig = (cid: string): InteractiveComponent["config"] | null => {
       for (const slide of report.presentation.slides) {
@@ -129,10 +219,16 @@ export default function Report() {
       }
     }
 
-    const polls = flattened.filter((c) => c.type === "poll");
-    const words = flattened.filter((c) => c.type === "wordcloud");
-    const ratings = flattened.filter((c) => c.type === "rating");
-    const qnas = flattened.filter((c) => c.type === "qna");
+    const filtered = flattened.filter((c) => {
+      if (filterType !== "all" && c.type !== filterType) return false;
+      if (filterSlide !== "all" && c.slideIndex !== filterSlide) return false;
+      return true;
+    });
+
+    const polls = filtered.filter((c) => c.type === "poll");
+    const words = filtered.filter((c) => c.type === "wordcloud");
+    const ratings = filtered.filter((c) => c.type === "rating");
+    const qnas = filtered.filter((c) => c.type === "qna");
 
     const avgPollParticipation =
       polls.length > 0
@@ -160,12 +256,47 @@ export default function Report() {
         : 0;
 
     const avgCompletion =
-      flattened.length > 0
-        ? Math.round(flattened.reduce((s, c) => s + c.summary.completionRate, 0) / flattened.length)
+      filtered.length > 0
+        ? Math.round(filtered.reduce((s, c) => s + c.summary.completionRate, 0) / filtered.length)
         : 0;
+
+    const lines: string[] = [];
+    lines.push(`# ${report.presentation.title} - 互动复盘纪要`);
+    lines.push("");
+    lines.push(`**时间**：${new Date(report.session.startedAt).toLocaleString()}`);
+    lines.push(`**总参与人数**：${report.totalAudience}`);
+    lines.push(`**平均完成率**：${avgCompletion}%`);
+    lines.push("");
+    lines.push("## 🎯 关键洞察");
+    if (report.insights.length === 0) {
+      lines.push("本次互动整体流畅，没有发现明显异常项。");
+    } else {
+      for (const ins of report.insights) {
+        const emoji = ins.severity === "danger" ? "🔴" : ins.severity === "warning" ? "🟡" : ins.severity === "success" ? "🟢" : "🔵";
+        lines.push(`${emoji} **${ins.title}**（第${ins.slideIndex + 1}页 · ${ins.slideTitle}）`);
+        lines.push(`> ${ins.description}`);
+        lines.push(`> ${ins.metric}`);
+        lines.push(`> 题目：${ins.prompt}`);
+        lines.push("");
+      }
+    }
+    lines.push("## 📊 各组件统计");
+    for (const c of flattened) {
+      const typeLabel = TYPE_LABELS[c.type] || c.type;
+      lines.push(`- **第${c.slideIndex + 1}页 · ${typeLabel}**：${c.prompt}`);
+      lines.push(`  提交 ${c.summary.totalSubmissions} 次 · 参与 ${c.summary.uniqueParticipants} 人 · 完成率 ${c.summary.completionRate}%`);
+      if (c.summary.firstSubmissionAt) {
+        lines.push(`  时间范围：${formatTime(c.summary.firstSubmissionAt)} ~ ${formatTime(c.summary.lastSubmissionAt!)}`);
+      }
+      lines.push("");
+    }
+    lines.push("---");
+    lines.push(`*由 LiveDeck 互动演示系统自动生成 · ${new Date().toLocaleString()}*`);
+    const copyText = lines.join("\n");
 
     return {
       flattenedComponents: flattened,
+      filteredComponents: filtered,
       stats: {
         polls,
         words,
@@ -178,8 +309,9 @@ export default function Report() {
         avgRating,
         avgCompletion,
       },
+      copyText,
     };
-  }, [report]);
+  }, [report, filterType, filterSlide]);
 
   if (loading) {
     return (
@@ -225,12 +357,21 @@ export default function Report() {
               {new Date(report.session.startedAt).toLocaleString()}
             </div>
           </div>
-          <button
-            onClick={exportCsv}
-            className="btn-primary py-2.5 px-5 inline-flex items-center gap-1.5 text-sm"
-          >
-            <Download className="w-4 h-4" /> 导出 CSV
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={copySummary}
+              className="btn-outline py-2.5 px-4 inline-flex items-center gap-1.5 text-sm"
+            >
+              {copiedSummary ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+              {copiedSummary ? "已复制" : "复制纪要"}
+            </button>
+            <button
+              onClick={exportCsv}
+              className="btn-primary py-2.5 px-5 inline-flex items-center gap-1.5 text-sm"
+            >
+              <Download className="w-4 h-4" /> 导出选中 ({selectedIds.size})
+            </button>
+          </div>
         </div>
       </header>
 
@@ -272,6 +413,92 @@ export default function Report() {
           />
         </section>
 
+        {report.insights.length > 0 && (
+          <section>
+            <h2 className="font-display text-2xl text-slate-800 mb-4 flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-accent-600" /> 复盘洞察
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {report.insights.map((ins, i) => (
+                <InsightCard key={i} insight={ins} />
+              ))}
+            </div>
+          </section>
+        )}
+
+        <section className="card p-5">
+          <div className="flex flex-wrap items-center gap-4 mb-4">
+            <div className="flex items-center gap-2">
+              <Filter className="w-4 h-4 text-slate-500" />
+              <span className="text-sm text-slate-600 font-medium">筛选</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500">类型</span>
+              <select
+                value={filterType}
+                onChange={(e) => setFilterType(e.target.value)}
+                className="input-field py-1.5 text-sm px-3 w-32"
+              >
+                <option value="all">全部</option>
+                <option value="poll">投票</option>
+                <option value="wordcloud">词云</option>
+                <option value="rating">评分</option>
+                <option value="qna">问答</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500">页面</span>
+              <select
+                value={filterSlide}
+                onChange={(e) => setFilterSlide(e.target.value === "all" ? "all" : Number(e.target.value))}
+                className="input-field py-1.5 text-sm px-3 w-40"
+              >
+                <option value="all">全部页面</option>
+                {report.presentation.slides.map((s, i) => (
+                  <option key={s.id} value={i}>第{i + 1}页 - {s.title}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex-1" />
+            <button
+              onClick={() => setSelectedIds(new Set(filteredComponents.map((c) => c.componentId)))}
+              className="text-xs px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 transition"
+            >
+              全选筛选结果
+            </button>
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="text-xs px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 transition"
+            >
+              取消全选
+            </button>
+          </div>
+          <div className="text-xs text-slate-500 flex items-center gap-2">
+            <Square className="w-3.5 h-3.5" /> 勾选复选框可选择要导出的互动项，当前筛选结果共 {filteredComponents.length} 项
+          </div>
+        </section>
+
+        <section className="card p-5 bg-gradient-to-br from-primary-50/40 to-accent-50/40 border-primary-100">
+          <div className="flex items-start justify-between gap-4 mb-3">
+            <div>
+              <h3 className="font-display text-lg text-slate-800 flex items-center gap-2">
+                <FileText className="w-5 h-5 text-primary-600" /> 可复制复盘纪要
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">一键复制完整的互动复盘文字，直接用于会后报告或会议纪要</p>
+            </div>
+            <button
+              onClick={copySummary}
+              className="btn-primary py-2 px-4 text-sm inline-flex items-center gap-1.5 shrink-0"
+            >
+              {copiedSummary ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+              {copiedSummary ? "已复制" : "复制全文"}
+            </button>
+          </div>
+          <pre className="bg-white/60 backdrop-blur rounded-xl p-4 text-sm text-slate-700 whitespace-pre-wrap font-sans max-h-80 overflow-y-auto border border-white/50">
+            {copyText}
+          </pre>
+        </section>
+
         <section>
           <h2 className="font-display text-2xl text-slate-800 mb-4 flex items-center gap-2">
             <BarChart3 className="w-5 h-5 text-primary-600" /> 会话总览
@@ -281,6 +508,23 @@ export default function Report() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-100 bg-slate-50/60">
+                    <th className="text-center px-3 py-3 w-10">
+                      <input
+                        type="checkbox"
+                        checked={
+                          filteredComponents.length > 0 &&
+                          filteredComponents.every((c) => selectedIds.has(c.componentId))
+                        }
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedIds(new Set(filteredComponents.map((c) => c.componentId)));
+                          } else {
+                            setSelectedIds(new Set());
+                          }
+                        }}
+                        className="w-4 h-4 accent-primary-600"
+                      />
+                    </th>
                     <th className="text-left px-4 py-3 font-semibold text-slate-500 text-xs uppercase tracking-wider">页面</th>
                     <th className="text-left px-4 py-3 font-semibold text-slate-500 text-xs uppercase tracking-wider">组件</th>
                     <th className="text-left px-4 py-3 font-semibold text-slate-500 text-xs uppercase tracking-wider">题目</th>
@@ -292,22 +536,24 @@ export default function Report() {
                   </tr>
                 </thead>
                 <tbody>
-                  {flattenedComponents.map((comp) => {
+                  {filteredComponents.map((comp) => {
                     const expanded = expandedIds.has(comp.componentId);
-                    const s = comp.summary;
+                    const selected = selectedIds.has(comp.componentId);
                     return (
                       <OverviewRow
                         key={comp.componentId}
                         comp={comp}
                         expanded={expanded}
+                        selected={selected}
                         onToggle={() => toggleExpand(comp.componentId)}
+                        onToggleSelect={() => toggleSelected(comp.componentId)}
                       />
                     );
                   })}
-                  {flattenedComponents.length === 0 && (
+                  {filteredComponents.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="px-4 py-10 text-center text-slate-400">
-                        本次演示未包含互动组件
+                      <td colSpan={9} className="px-4 py-10 text-center text-slate-400">
+                        没有匹配的互动组件
                       </td>
                     </tr>
                   )}
@@ -322,22 +568,33 @@ export default function Report() {
             <BarChart3 className="w-5 h-5 text-primary-600" /> 互动题详情
           </h2>
           <div className="space-y-4">
-            {flattenedComponents.map((comp, idx) => (
-              <div
-                key={comp.componentId}
-                className="card overflow-hidden animate-slide-up"
-                style={{ animationDelay: `${idx * 30}ms` }}
-              >
-                <button
-                  onClick={() => toggleExpand(comp.componentId)}
-                  className="w-full text-left p-5 flex items-center gap-4 hover:bg-slate-50/60 transition"
+            {filteredComponents.map((comp, idx) => {
+              const selected = selectedIds.has(comp.componentId);
+              return (
+                <div
+                  key={comp.componentId}
+                  className="card overflow-hidden animate-slide-up"
+                  style={{ animationDelay: `${idx * 30}ms` }}
                 >
-                  <div className="flex flex-col items-center shrink-0">
-                    <span className="text-[10px] text-slate-400 font-bold">SLIDE</span>
-                    <span className="font-display text-2xl text-primary-600 leading-none">
-                      {comp.slideIndex + 1}
-                    </span>
-                  </div>
+                  <div className="flex items-start">
+                    <div className="pt-5 pl-5">
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => toggleSelected(comp.componentId)}
+                        className="w-4 h-4 accent-primary-600"
+                      />
+                    </div>
+                    <button
+                      onClick={() => toggleExpand(comp.componentId)}
+                      className="flex-1 text-left p-5 flex items-center gap-4 hover:bg-slate-50/60 transition"
+                    >
+                      <div className="flex flex-col items-center shrink-0">
+                        <span className="text-[10px] text-slate-400 font-bold">SLIDE</span>
+                        <span className="font-display text-2xl text-primary-600 leading-none">
+                          {comp.slideIndex + 1}
+                        </span>
+                      </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <span className={`chip ${TYPE_CHIP[comp.type]}`}>
@@ -491,11 +748,13 @@ export default function Report() {
                   </div>
                 )}
               </div>
-            ))}
-            {flattenedComponents.length === 0 && (
+                </div>
+              );
+            })}
+            {filteredComponents.length === 0 && (
               <div className="card p-10 text-center">
                 <Sparkles className="w-12 h-12 mx-auto text-slate-300 mb-3" />
-                <p className="text-slate-500">本次演示未包含互动组件</p>
+                <p className="text-slate-500">没有匹配的互动组件</p>
               </div>
             )}
           </div>
@@ -513,15 +772,28 @@ export default function Report() {
 function OverviewRow({
   comp,
   expanded,
+  selected,
   onToggle,
+  onToggleSelect,
 }: {
   comp: FlattenedReportComponent;
   expanded: boolean;
+  selected: boolean;
   onToggle: () => void;
+  onToggleSelect: () => void;
 }) {
   const s = comp.summary;
   return (
     <tr className={`border-b border-slate-50 hover:bg-slate-50/60 transition ${expanded ? "bg-primary-50/20" : ""}`}>
+      <td className="text-center px-3 py-3">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggleSelect}
+          onClick={(e) => e.stopPropagation()}
+          className="w-4 h-4 accent-primary-600"
+        />
+      </td>
       <td className="px-4 py-3">
         <span className="font-display text-base text-primary-600">{comp.slideIndex + 1}</span>
         <span className="text-slate-400 ml-1.5 text-xs">{comp.slideTitle}</span>
@@ -562,14 +834,6 @@ function OverviewRow({
       </td>
     </tr>
   );
-}
-
-function formatTime(iso: string): string {
-  try {
-    return new Date(iso).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-  } catch {
-    return "-";
-  }
 }
 
 function MiniStat({ label, value }: { label: string; value: string | number }) {

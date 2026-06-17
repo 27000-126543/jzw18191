@@ -86,6 +86,8 @@ export interface WordEntry {
   word: string;
   count: number;
   componentId: string;
+  audienceId: string;
+  timestamp: string;
 }
 
 export interface RatingResponse {
@@ -139,6 +141,26 @@ export interface RatingResult {
   distribution: { rating: number; count: number }[];
 }
 
+export interface AggregatedWord {
+  word: string;
+  count: number;
+}
+
+export type InsightSeverity = "info" | "warning" | "success" | "danger";
+export type InsightType = "low_participation" | "high_divergence" | "high_volatility" | "qa_backlog" | "high_consensus";
+
+export interface ReportInsight {
+  type: InsightType;
+  severity: InsightSeverity;
+  componentId: string;
+  slideIndex: number;
+  slideTitle: string;
+  prompt: string;
+  title: string;
+  description: string;
+  metric: string;
+}
+
 export interface ComponentReportSummary {
   componentId: string;
   type: InteractiveType;
@@ -154,6 +176,7 @@ export interface ReportData {
   presentation: Presentation;
   session: Session;
   totalAudience: number;
+  insights: ReportInsight[];
   slidesReport: {
     slideIndex: number;
     slideTitle: string;
@@ -161,7 +184,7 @@ export interface ReportData {
       componentId: string;
       type: InteractiveType;
       prompt: string;
-      results: PollResult | WordEntry[] | RatingResult | { questions: AudienceQuestion[] };
+      results: PollResult | WordEntry[] | AggregatedWord[] | RatingResult | { questions: AudienceQuestion[] };
       summary: ComponentReportSummary;
     }[];
   }[];
